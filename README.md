@@ -185,7 +185,8 @@ print(f"Measurement results: {counts}")
 from qpiai_quantum import GroverSearch, QFT, ShorsAlgorithm
 
 # Grover's search
-grover = GroverSearch(num_qubits=3, oracle_type="custom")
+grover = GroverSearch(num_qubits=3, target="101")
+circuit = grover.build_circuit()
 
 # Quantum Fourier Transform
 qft = QFT(num_qubits=4)
