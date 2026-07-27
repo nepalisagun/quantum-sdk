@@ -44,6 +44,7 @@ dependencies = [
     "scipy",
     "requests-sse",
     "python-dotenv",
+    "psutil",
 ]
 
 [project.urls]

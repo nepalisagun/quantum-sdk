@@ -281,7 +281,12 @@
     "Ising",
     "TFIM",
     "Motta",
-    "eigenstates"
+    "eigenstates",
+    "numba",
+    "njit",
+    "prange",
+    "fastmath",
+    "psutil"
   ],
   "ignorePaths": [
     "node_modules/**",
