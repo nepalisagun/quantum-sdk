@@ -445,8 +445,6 @@ def test_local_simulator_composite_operation():
     main_circ.add_operation(composite_op)
 
 
-
-
 # ==========================================
 # GATE COMPLETION TESTS (U2, CU, DCX, RCCX, CSDG)
 # ==========================================
@@ -576,3 +574,28 @@ def test_all_new_gates_run_simulation():
     result = circ.run(device_name="QpiAI-QSV-Local", shots=100)
     assert result is not None
 
+
+# ==========================================
+# CIRCUIT DEPTH TESTS
+# ==========================================
+
+
+def test_depth_measure_only_circuit():
+    """Regression: depth() must not raise UnboundLocalError on measure-only circuits (issue #22)."""
+    circ = Circuit(2, 2)
+    circ.measure(0, 0)
+    circ.measure(1, 1)
+    assert circ.depth() == 0
+
+
+def test_depth_barrier_only_circuit():
+    """depth() should return 0 for circuits with only barriers."""
+    circ = Circuit(3)
+    circ.barrier(0, 1, 2)
+    assert circ.depth() == 0
+
+
+def test_depth_empty_circuit():
+    """depth() should return 0 for an empty circuit."""
+    circ = Circuit(2)
+    assert circ.depth() == 0
