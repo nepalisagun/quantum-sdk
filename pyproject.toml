@@ -38,6 +38,7 @@ dependencies = [
     "cvxpy",
     "matplotlib",
     "networkx",
+    "numba",
     "numpy",
     "plotly",
     "requests",
