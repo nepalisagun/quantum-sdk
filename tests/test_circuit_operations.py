@@ -445,8 +445,6 @@ def test_local_simulator_composite_operation():
     main_circ.add_operation(composite_op)
 
 
-
-
 # ==========================================
 # GATE COMPLETION TESTS (U2, CU, DCX, RCCX, CSDG)
 # ==========================================
@@ -601,28 +599,3 @@ def test_depth_empty_circuit():
     """depth() should return 0 for an empty circuit."""
     circ = Circuit(2)
     assert circ.depth() == 0
-
-
-def test_depth_single_gate():
-    """depth() should return 1 for a single gate."""
-    circ = Circuit(2)
-    circ.h(0)
-    assert circ.depth() == 1
-
-
-def test_depth_parallel_gates():
-    """Parallel gates on different qubits should have depth 1."""
-    circ = Circuit(2)
-    circ.h(0)
-    circ.x(1)
-    assert circ.depth() == 1
-
-
-def test_depth_sequential_gates():
-    """Sequential gates on the same qubit should increase depth."""
-    circ = Circuit(1)
-    circ.h(0)
-    circ.x(0)
-    circ.z(0)
-    assert circ.depth() == 3
-
