@@ -37,6 +37,13 @@ class JobManager:
     from quantum circuit execution jobs on QPIAI backends.
     """
 
+    _resource_cache: dict[tuple[str, str], str] = {}
+
+    @classmethod
+    def clear_resource_cache(cls):
+        """Clear the compute resource ID cache."""
+        cls._resource_cache.clear()
+
     @staticmethod
     def track_job(func, job_name: str):
         """
@@ -85,6 +92,13 @@ class JobManager:
         Returns:
             Optional[str]: Compute resource ID (UUID string), or None if not found
         """
+        cache_key = (method, device_name)
+        if cache_key in JobManager._resource_cache:
+            logger.debug(
+                f"Using cached compute resource ID for {cache_key}: {JobManager._resource_cache[cache_key]}"
+            )
+            return JobManager._resource_cache[cache_key]
+
         try:
             import requests
         except ImportError:
@@ -100,8 +114,8 @@ class JobManager:
             ("density_matrix", "QpiAI-QDM-Lite"): "QpiAI-QDM-Lite",
         }
         # Try with normalized values
-        resource_name = resource_name_map.get((method, device_name))
-
+        resource_name = resource_name_map.get(cache_key)
+        # print(f"DevMapped to resource name: {resource_name}")
         if not resource_name:
             logger.warning(
                 f"No compute resource mapping for method={method}), "
@@ -117,26 +131,20 @@ class JobManager:
 
             if response.status_code == 200:
                 resources = response.json()
-                # API returns list of resources with structure:
-                # [{'ID': 'uuid', device_name: 'QpiAI-QSV-Simulator', ...}, ...]
+                if isinstance(resources, dict) and "compute_resources" in resources:
+                    resources = resources["compute_resources"]
+
                 if isinstance(resources, list):
                     for resource in resources:
-                        backend_name = resource.get("backend_name")
-                        if backend_name == resource_name:
-                            resource_id = resource.get("ID")
-                            logger.debug(
-                                f"Found compute resource: {backend_name} -> {resource_id}"
-                            )
-                            return resource_id
-                elif isinstance(resources, dict) and "compute_resources" in resources:
-                    for resource in resources["compute_resources"]:
-                        backend_name = resource.get("backend_name")
-                        if backend_name == resource_name:
-                            resource_id = resource.get("ID")
-                            logger.debug(
-                                f"Found compute resource: {backend_name} -> {resource_id}"
-                            )
-                            return resource_id
+                        b_name = resource.get("backend_name")
+                        r_id = resource.get("ID")
+                        if b_name and r_id:
+                            for key_pair, val_name in resource_name_map.items():
+                                if val_name == b_name:
+                                    JobManager._resource_cache[key_pair] = r_id
+
+                if cache_key in JobManager._resource_cache:
+                    return JobManager._resource_cache[cache_key]
 
             logger.warning(f"Could not find compute resource ID for {resource_name}")
             return None
@@ -1051,11 +1059,21 @@ class JobManager:
                 and "real" in statevector[0]
                 and "imag" in statevector[0]
             ):
-                # Convert from {"real": x, "imag": y} format to complex numbers
-                converted_statevector = []
-                for state in statevector:
-                    complex_val = complex(state["real"], state["imag"])
-                    converted_statevector.append([np.complex128(complex_val)])
+                import operator
+
+                get_real = operator.itemgetter("real")
+                get_imag = operator.itemgetter("imag")
+                reals = np.fromiter(
+                    map(get_real, statevector),
+                    dtype=np.float64,
+                    count=len(statevector),
+                )
+                imags = np.fromiter(
+                    map(get_imag, statevector),
+                    dtype=np.float64,
+                    count=len(statevector),
+                )
+                converted_statevector = (reals + 1j * imags).reshape(-1, 1).tolist()
                 statevector = converted_statevector
 
             # Create JobResult object with rich job metadata

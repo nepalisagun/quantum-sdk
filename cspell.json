@@ -286,7 +286,10 @@
     "njit",
     "prange",
     "fastmath",
-    "psutil"
+    "psutil",
+    "seaborn",
+    "fromiter",
+    "imags"
   ],
   "ignorePaths": [
     "node_modules/**",
