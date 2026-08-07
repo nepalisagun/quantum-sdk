@@ -8,6 +8,7 @@
     "ansatze",
     "statevector",
     "statevectors",
+    "frombuffer",
     "qaoa",
     "vqe",
     "qpe",

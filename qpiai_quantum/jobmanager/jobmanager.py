@@ -1082,6 +1082,7 @@ class JobManager:
                 counts=counts,
                 statevector=statevector,
                 probabilities=results_data.get("probabilities"),
+                density_matrix=results_data.get("density_matrix"),
                 message="Job completed successfully",
                 execution_time=job_data.get("execution_time_ms", 0) / 1000.0
                 if job_data.get("execution_time_ms")
@@ -1153,7 +1154,9 @@ class JobManager:
 
         return None
 
-    def _download_s3_result_via_backend(self, s3_path: str) -> dict[str, Any]:
+    def _download_s3_result_via_backend(
+        self, s3_path: str, result_type: str | None = None
+    ) -> dict[str, Any]:
         try:
             import requests
         except ImportError:
@@ -1196,6 +1199,33 @@ class JobManager:
                 f"Failed to download S3 result file for '{s3_path}': {e}"
             )
 
+        content_type = file_response.headers.get("Content-Type", "").lower()
+        if (
+            "application/octet-stream" in content_type
+            or "application/x-qpiai-binary" in content_type
+            or s3_path.endswith(".bin")
+        ):
+            import numpy as np
+
+            raw_bytes = file_response.content
+            complex_arr = np.frombuffer(raw_bytes, dtype=np.complex128)
+
+            if result_type == "density_matrix" or "density_matrix" in s3_path:
+                dim = int(np.sqrt(len(complex_arr)))
+                dm_matrix = complex_arr.reshape(dim, dim).tolist()
+                return {
+                    "results": {"data": {"density_matrix": dm_matrix}},
+                    "density_matrix": dm_matrix,
+                    "message": "Job completed successfully",
+                }
+
+            statevector = complex_arr.reshape(-1, 1).tolist()
+            return {
+                "results": {"data": {"statevector": statevector}},
+                "statevector": statevector,
+                "message": "Job completed successfully",
+            }
+
         try:
             return file_response.json()
         except ValueError:
@@ -1220,6 +1250,36 @@ class JobManager:
         s3_path = self._extract_s3_path_from_response(parsed_data)
         if s3_path:
             return self._download_s3_result_via_backend(s3_path)
+
+        # Handle binary S3 pointer from qcloud-workers (large_file + bucket + key)
+        if (
+            isinstance(parsed_data, dict)
+            and parsed_data.get("large_file")
+            and parsed_data.get("bucket")
+            and parsed_data.get("key")
+        ):
+            constructed_s3_path = f"s3://{parsed_data['bucket']}/{parsed_data['key']}"
+            result_type = parsed_data.get("result_type")
+            downloaded = self._download_s3_result_via_backend(
+                constructed_s3_path, result_type=result_type
+            )
+            # Merge metadata from the pointer (counts, execution_time) into downloaded result
+            if isinstance(downloaded, dict):
+                pointer_counts = parsed_data.get("counts")
+                if pointer_counts and not downloaded.get("counts"):
+                    downloaded["counts"] = pointer_counts
+                    if "results" in downloaded and isinstance(
+                        downloaded["results"], dict
+                    ):
+                        downloaded["results"].setdefault("data", {})["counts"] = (
+                            pointer_counts
+                        )
+                pointer_exec_time = parsed_data.get("execution_time")
+                if pointer_exec_time:
+                    downloaded.setdefault(
+                        "execution_time", f"{pointer_exec_time:.4f} seconds"
+                    )
+            return downloaded
 
         return parsed_data
 
