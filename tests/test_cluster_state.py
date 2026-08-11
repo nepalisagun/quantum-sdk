@@ -85,6 +85,19 @@ class TestClusterState(unittest.TestCase):
         self.assertIsInstance(gen, ClusterStateGenerator)
         self.assertEqual(gen.num_qubits, 5)
 
+    def test_local_execution(self):
+        """Test local execution of cluster state preparation."""
+        num_qubits = 3
+        cluster_gen = create_cluster_state(num_qubits=num_qubits)
+        cluster_gen.build_circuit(measure=True)
+
+        shots = 1024
+        result = cluster_gen.run(shots=shots, device_name="QpiAI-QSV-Local")
+        counts = result.get()["counts"]
+
+        self.assertGreaterEqual(len(counts), 1)
+        is_valid = cluster_gen.verify_entanglement(result)
+        self.assertTrue(is_valid, "Cluster state entanglement verification failed")
     @unittest.skipUnless(
         os.getenv("API_KEY"),
         "API key not found in environment",
