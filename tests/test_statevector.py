@@ -1,6 +1,8 @@
 import unittest
 import sys
 import os
+from unittest.mock import patch
+
 import numpy as np
 
 # Ensure qpiai_quantum is in path
@@ -10,6 +12,7 @@ from qpiai_quantum.quantum_info.statevector import Statevector
 from qpiai_quantum.quantum_info.density_matrix import DensityMatrix
 from qpiai_quantum.circuit import Circuit
 from qpiai_quantum.simulator.statevector import StatevectorSimulator
+from qpiai_quantum.simulator.result import QasmSimulatorResult
 
 
 class TestStatevector(unittest.TestCase):
@@ -129,6 +132,25 @@ class TestStatevector(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             sv.evolve(qc)
+
+    def test_init_from_circuit_uses_result_statevector(self):
+        """Test circuit construction through the common result interface."""
+        qc = Circuit(1)
+        result = QasmSimulatorResult(statevector=[[1.0], [0.0]])
+
+        with patch.object(qc, "run", return_value=result):
+            sv = Statevector(qc)
+
+        np.testing.assert_array_equal(sv.data, [1.0, 0.0])
+
+    def test_init_from_circuit_rejects_missing_statevector(self):
+        """Test a clear failure when execution returns no statevector."""
+        qc = Circuit(1)
+        result = QasmSimulatorResult(statevector=None)
+
+        with patch.object(qc, "run", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "returned no statevector"):
+                Statevector(qc)
 
     def test_simulator_unnormalized_initial_state(self):
         """Test that simulator raises ValueError if initial_state is not normalized."""

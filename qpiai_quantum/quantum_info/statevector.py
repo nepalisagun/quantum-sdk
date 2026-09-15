@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import time
+
 import numpy as np
-from typing import Union, Optional
+
 from ..circuit.circuit import Circuit
-from ..jobmanager import JobManager
+from ..results.base_result import BaseQuantumResult
 
 
 class Statevector:
@@ -19,7 +22,7 @@ class Statevector:
 
     def __init__(
         self,
-        data: Union[list, np.ndarray, Circuit, "Statevector"],
+        data: list | np.ndarray | Circuit | Statevector,
         dims: list[int] | None = None,
         experiment_name: str = "Default Experiment",
         device_name: str = "QpiAI-QSV-Local",
@@ -109,16 +112,17 @@ class Statevector:
             circuit_name=circuit_name,
         )
 
-        # Extract statevector from result
-        if hasattr(result, "statevector") and result.statevector is not None:
-            self._init_from_array(result.statevector)
-        elif hasattr(result, "state") and result.state is not None:
-            self._init_from_array(result.state)
-        else:
-            raise RuntimeError("Failed to get statevector from circuit simulation")
+        self._init_from_array(self._require_result_statevector(result))
+
+    @staticmethod
+    def _require_result_statevector(result: BaseQuantumResult) -> list:
+        """Return a result statevector or fail with a consistent error."""
+        if result.statevector is None:
+            raise RuntimeError("Statevector simulation returned no statevector")
+        return result.statevector
 
     @classmethod
-    def from_label(cls, label: str) -> "Statevector":
+    def from_label(cls, label: str) -> Statevector:
         """
         Create a statevector from a computational basis state label.
 
@@ -147,7 +151,7 @@ class Statevector:
         circuit: Circuit,
         experiment_name: str = "Default Experiment",
         device_name: str = "QpiAI-QSV-Local",
-    ) -> "Statevector":
+    ) -> Statevector:
         """
         Create a statevector by simulating a quantum circuit.
 
@@ -297,7 +301,7 @@ class Statevector:
         rho = np.outer(self.data, np.conj(self.data))
         return DensityMatrix(rho)
 
-    def evolve(self, other: Circuit | np.ndarray) -> "Statevector":
+    def evolve(self, other: Circuit | np.ndarray) -> Statevector:
         """
         Evolve the statevector by a circuit or unitary matrix.
 
@@ -312,13 +316,11 @@ class Statevector:
 
             simulator = StatevectorSimulator()
             result = simulator.run(other, initial_state=self.data)
-            if result.statevector is None:
-                raise RuntimeError("Statevector simulator returned no statevector")
-            return Statevector(result.statevector)
-        else:
-            # Assume it's a unitary matrix
-            new_data = other @ self.data
-            return Statevector(new_data)
+            return Statevector(self._require_result_statevector(result))
+
+        # Assume it's a unitary matrix
+        new_data = other @ self.data
+        return Statevector(new_data)
 
     def __repr__(self) -> str:
         """String representation in Qiskit-style format."""
@@ -343,25 +345,25 @@ class Statevector:
         """Return as numpy array."""
         return self.data
 
-    def copy(self) -> "Statevector":
+    def copy(self) -> Statevector:
         """Create a copy of the statevector."""
         return Statevector(self.data.copy())
 
-    def __truediv__(self, scalar) -> "Statevector":
+    def __truediv__(self, scalar) -> Statevector:
         """Division operator to maintain Statevector type."""
         new_data = self.data / scalar
         return Statevector(new_data)
 
-    def __mul__(self, scalar) -> "Statevector":
+    def __mul__(self, scalar) -> Statevector:
         """Multiplication operator to maintain Statevector type."""
         new_data = self.data * scalar
         return Statevector(new_data)
 
-    def __rmul__(self, scalar) -> "Statevector":
+    def __rmul__(self, scalar) -> Statevector:
         """Right multiplication operator."""
         return self.__mul__(scalar)
 
-    def __add__(self, other) -> "Statevector":
+    def __add__(self, other) -> Statevector:
         """Addition operator."""
         if isinstance(other, Statevector):
             new_data = self.data + other.data
@@ -369,7 +371,7 @@ class Statevector:
             new_data = self.data + other
         return Statevector(new_data)
 
-    def __sub__(self, other) -> "Statevector":
+    def __sub__(self, other) -> Statevector:
         """Subtraction operator."""
         if isinstance(other, Statevector):
             new_data = self.data - other.data
