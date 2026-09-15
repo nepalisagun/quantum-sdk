@@ -312,6 +312,8 @@ class Statevector:
 
             simulator = StatevectorSimulator()
             result = simulator.run(other, initial_state=self.data)
+            if result.statevector is None:
+                raise RuntimeError("Statevector simulator returned no statevector")
             return Statevector(result.statevector)
         else:
             # Assume it's a unitary matrix
