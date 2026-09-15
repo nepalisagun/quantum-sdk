@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+import pytest
 from qpiai_quantum.applications.matter import (
     ChainLattice,
     SquareLattice,
@@ -97,6 +98,7 @@ class TestMatterModule(unittest.TestCase):
         # Verify QITE ground energy is close to the exact eigenvalue
         self.assertAlmostEqual(energy_qite, exact_ground_energy, places=4)
 
+    @pytest.mark.usefixtures("authenticated_sdk_user")
     def test_vqe_hva_optimization(self):
         # 3-site Heisenberg XYZ: H = -1.0 * (XX + YY + ZZ) on edges (0,1) and (1,2)
         lattice = ChainLattice(n_sites=3)

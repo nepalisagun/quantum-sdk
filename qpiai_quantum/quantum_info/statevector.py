@@ -3,7 +3,6 @@ import numpy as np
 from typing import Union, Optional
 from ..circuit.circuit import Circuit
 from ..jobmanager import JobManager
-import os
 
 
 class Statevector:
@@ -101,13 +100,6 @@ class Statevector:
         device_name: str = "QpiAI-QSV-Local",
     ):
         """Initialize by simulating a circuit."""
-        # Get API key from environment
-        api_key = os.getenv("API_KEY")
-        if not api_key:
-            raise ValueError(
-                "API_KEY not found in environment. Please set it or pass it explicitly."
-            )
-
         circuit_name = f"statevector_circuit_{int(time.time())}"
         result = circuit.run(
             shots=1024,

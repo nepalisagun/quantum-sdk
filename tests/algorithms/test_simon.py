@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 import os
 import sys
+import pytest
 from dotenv import load_dotenv
 
 load_dotenv("qcloud.env")
@@ -68,6 +69,7 @@ class TestSimonExecutionWithMock(unittest.TestCase):
         self.assertEqual(res, "10")
 
 
+@pytest.mark.usefixtures("authenticated_sdk_user")
 @unittest.skipUnless(
     os.environ.get("RUN_ALGO_CORRECTNESS") == "1" and bool(os.getenv("API_KEY")),
     "Skipping correctness test. Set RUN_ALGO_CORRECTNESS=1 and API_KEY in environment to run.",

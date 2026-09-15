@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+import pytest
 from qpiai_quantum.algorithms.opt.solvers.vqe import VQESolver, VQEResult
 from qpiai_quantum.circuit import Circuit
 
@@ -87,6 +88,7 @@ class TestVQEXYTerms(unittest.TestCase):
         exp = vqe._compute_counts_expectation(counts, terms)
         self.assertAlmostEqual(exp, -1.5)
 
+    @pytest.mark.usefixtures("authenticated_sdk_user")
     def test_vqe_optimization_tfim_statevector(self):
         # Transverse-Field Ising model: H = -1.0 * Z0 Z1 - 0.5 * X0 - 0.5 * X1
         terms = [
@@ -110,6 +112,7 @@ class TestVQEXYTerms(unittest.TestCase):
         # Ground state energy is around -1.25. The optimizer should find an energy <= -1.0.
         self.assertLess(res.optimal_energy, -0.9)
 
+    @pytest.mark.usefixtures("authenticated_sdk_user")
     def test_vqe_optimization_tfim_shots(self):
         # Shot-based optimization with grouping
         terms = [

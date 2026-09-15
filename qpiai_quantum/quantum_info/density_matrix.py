@@ -6,7 +6,6 @@ from typing import Union, Optional
 from ..circuit.circuit import Circuit
 from ..jobmanager import JobManager
 from ..formalism.density_matrix.base_density_matrix import BaseDensityMatrix
-import os
 
 try:
     from ..formalism import DensityMatrix as FormalismDensityMatrix
@@ -169,13 +168,6 @@ class DensityMatrix(BaseDensityMatrix):
         device_name: str = "QpiAI-QSV-Local",
     ):
         """Initialize by simulating a circuit."""
-        # Get API key from environment
-        api_key = os.getenv("API_KEY")
-        if not api_key:
-            raise ValueError(
-                "API_KEY not found in environment. Please set it or pass it explicitly."
-            )
-
         circuit_name = f"density_matrix_circuit_{int(time.time())}"
         result = circuit.run(
             shots=1024,

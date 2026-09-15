@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+import pytest
 from qpiai_quantum.applications.chemistry import (
     FermionOperator,
     jordan_wigner,
@@ -77,6 +78,7 @@ class TestChemistryModule(unittest.TestCase):
         n_params = vqe._count_parameters()
         self.assertGreater(n_params, 0)
 
+    @pytest.mark.usefixtures("authenticated_sdk_user")
     def test_vqe_chemistry_optimization(self):
         # Load pre-computed molecular properties of H2
         driver = MolecularDriver(geometry="H2", basis="sto-3g")

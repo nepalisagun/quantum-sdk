@@ -427,7 +427,7 @@ def test_mcx_gate():
     assert ops[0].qubits == [0, 1, 2, 3]
 
 
-def test_local_simulator_iswap():
+def test_local_simulator_iswap(authenticated_sdk_user):
     circ = Circuit(2)
     circ.iswap(0, 1)
     result = circ.run(device_name="QpiAI-QSV-Local", shots=100)
@@ -562,7 +562,7 @@ def test_inverse_cu_gate():
     assert ops[0].params == pytest.approx([-0.75, -0.1, -0.2, -0.5])
 
 
-def test_all_new_gates_run_simulation():
+def test_all_new_gates_run_simulation(authenticated_sdk_user):
     """Test that all new gates execute without error in local simulator."""
     circ = Circuit(4)
     circ.u2(0, 0.5, 0.3)

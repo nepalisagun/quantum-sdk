@@ -1000,6 +1000,13 @@ class Circuit:
             raise ValueError("Cannot get statevector from Density Matrix simulator.")
 
         if device_name == "QpiAI-QSV-Local":
+            from ..authentication.user import get_user
+
+            user = get_user()
+            if user is None or not user.name or not user.email:
+                raise ValueError(
+                    "Authentication required. Call QpiAIQuantumAuth.login(api_key) first."
+                )
             simulator = StatevectorSimulator()
             result = simulator.run(self, shots=shots, name=experiment_name)
             if reverse_bits and result.counts:

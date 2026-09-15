@@ -70,6 +70,7 @@ def test_canonical_qae_build_circuit():
     assert built_circuit.num_clbits == 3
 
 
+@pytest.mark.usefixtures("authenticated_sdk_user")
 def test_canonical_qae_estimation_local():
     theta = 0.8
     expected_prob = math.sin(theta / 2) ** 2
@@ -89,6 +90,7 @@ def test_canonical_qae_estimation_local():
     os.environ.get("RUN_ALGO_CORRECTNESS") != "1" or not os.getenv("API_KEY"),
     reason="Skipping correctness test. Set RUN_ALGO_CORRECTNESS=1 and API_KEY in environment to run.",
 )
+@pytest.mark.usefixtures("authenticated_sdk_user")
 def test_amplitude_estimation_correctness():
     import uuid
 
@@ -108,6 +110,7 @@ def test_amplitude_estimation_correctness():
 # theta=0.8 still happens to pass, so the sweep below is what actually pins
 # the convention down: theta=0.2 returns ~0.378 instead of ~0.010.
 @pytest.mark.parametrize("theta", [0.2, 0.5, 0.8, 1.5, 2.2, 2.8])
+@pytest.mark.usefixtures("authenticated_sdk_user")
 def test_canonical_qae_amplitude_sweep(theta):
     expected_prob = math.sin(theta / 2) ** 2
 
@@ -122,6 +125,7 @@ def test_canonical_qae_amplitude_sweep(theta):
 
 
 @pytest.mark.parametrize("theta,expected_prob", [(0.0, 0.0), (math.pi, 1.0)])
+@pytest.mark.usefixtures("authenticated_sdk_user")
 def test_canonical_qae_boundary_amplitudes(theta, expected_prob):
     circuit = Circuit(1)
     circuit.ry(0, theta)
@@ -145,6 +149,7 @@ def _two_qubit_problem(is_good_state):
     )
 
 
+@pytest.mark.usefixtures("authenticated_sdk_user")
 def test_canonical_qae_honours_custom_good_state():
     # Counts layout is MSB first, so bitstring[0] is qubit 1 and bitstring[1]
     # is qubit 0.  "exactly one qubit is 1" cannot be expressed as the default
@@ -161,6 +166,7 @@ def test_canonical_qae_honours_custom_good_state():
     assert abs(estimated_prob - expected_prob) < 0.05
 
 
+@pytest.mark.usefixtures("authenticated_sdk_user")
 def test_canonical_qae_custom_good_state_marking_zeros():
     p0 = math.sin(0.8 / 2) ** 2
     p1 = math.sin(1.1 / 2) ** 2
@@ -240,6 +246,7 @@ def test_canonical_qae_allows_oversized_default_marking():
         (lambda bitstring: True, 1.0),
     ],
 )
+@pytest.mark.usefixtures("authenticated_sdk_user")
 def test_canonical_qae_degenerate_good_state(is_good_state, expected_prob):
     """A predicate marking no states or every state must still be exact."""
     problem = _two_qubit_problem(is_good_state)

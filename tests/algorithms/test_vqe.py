@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import os
 import sys
 import numpy as np
+import pytest
 from dotenv import load_dotenv
 
 load_dotenv("qcloud.env")
@@ -65,6 +66,7 @@ class TestVQEHelpers(unittest.TestCase):
         self.assertAlmostEqual(exp, 0.75)
 
 
+@pytest.mark.usefixtures("authenticated_sdk_user")
 @unittest.skipUnless(
     os.environ.get("RUN_ALGO_CORRECTNESS") == "1" and bool(os.getenv("API_KEY")),
     "Skipping correctness test. Set RUN_ALGO_CORRECTNESS=1 and API_KEY in environment to run.",
