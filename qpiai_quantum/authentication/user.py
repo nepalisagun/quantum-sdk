@@ -87,6 +87,6 @@ def user_context(api_key: str):
     finally:
         if old_user is not None:
             # Restore previous user context
-            set_user(old_user.api_key)
+            set_user(old_user)
         else:
             clear_user()
