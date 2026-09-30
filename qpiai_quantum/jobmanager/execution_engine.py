@@ -1,4 +1,3 @@
-import os
 import time
 import logging
 from typing import Optional, Any, TYPE_CHECKING
@@ -29,8 +28,7 @@ class ExecutionEngine:
         from ..authentication.user import user_context
         from .jobmanager import JobManager
 
-        if access_token is None:
-            access_token = ExecutionEngine._get_api_key(**kwargs)
+        access_token = ExecutionEngine._get_api_key(access_token=access_token)
 
         if experiment_name is None:
             experiment_name = "Default Experiment"
@@ -64,21 +62,12 @@ class ExecutionEngine:
         return result
 
     @staticmethod
-    def _get_api_key(**kwargs) -> str:
-        if "access_token" in kwargs:
-            return kwargs["access_token"]
+    def _get_api_key(access_token: str | None = None) -> str:
+        """Return the shared SDK credential or raise when none is configured."""
+        from ..authentication.user import resolve_api_key
 
-        try:
-            from ..authentication.user import get_user
-
-            user = get_user()
-            if user and hasattr(user, "api_key") and user.api_key:
-                return user.api_key
-        except (ImportError, Exception):
-            pass
-
-        api_key = os.getenv("API_KEY")
-        if api_key:
+        api_key = resolve_api_key(access_token)
+        if api_key is not None:
             return api_key
 
         raise ValueError(

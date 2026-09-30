@@ -162,6 +162,31 @@ class TestStatevector(unittest.TestCase):
         with self.assertRaises(ValueError):
             sim.run(qc, initial_state=np.array([1.0, 1.0]))
 
+    def test_evolve_rejects_missing_simulator_state(self):
+        """Direct simulation must fail clearly if the result has no state."""
+        state = Statevector([1.0, 0.0])
+        result = QasmSimulatorResult(statevector=None)
+        with patch.object(StatevectorSimulator, "run", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "returned no statevector"):
+                state.evolve(Circuit(1))
+
+    def test_result_validator_accepts_cloud_result(self):
+        """The common validator accepts the cloud result interface too."""
+        from qpiai_quantum.jobmanager.job_result import JobResult
+
+        result = JobResult()
+        result.statevector = [[1.0], [0.0]]
+        np.testing.assert_array_equal(
+            Statevector._require_result_statevector(result), [[1.0], [0.0]]
+        )
+
+    def test_result_validator_rejects_missing_cloud_state(self):
+        """Missing cloud state fails through the same result boundary."""
+        from qpiai_quantum.jobmanager.job_result import JobResult
+
+        with self.assertRaisesRegex(RuntimeError, "returned no statevector"):
+            Statevector._require_result_statevector(JobResult())
+
 
 if __name__ == "__main__":
     unittest.main()

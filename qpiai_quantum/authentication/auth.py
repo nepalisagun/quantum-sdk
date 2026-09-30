@@ -9,13 +9,20 @@ from .exceptions import (
     UserNotFoundError,
 )
 
-from .user import set_user, get_user, clear_user, SDKUser
+from .user import (
+    SDKUser,
+    clear_user,
+    get_active_api_key,
+    get_user,
+    normalize_api_key,
+    set_user,
+)
 
 
 class QpiAIQuantumAuth:
     @staticmethod
     def _create_user_env():
-        if os.environ.get("API_KEY", None) is None:
+        if normalize_api_key(os.environ.get("API_KEY")) is None:
             raise APIKeyInvalidError()
 
     @staticmethod
@@ -24,7 +31,8 @@ class QpiAIQuantumAuth:
             raise APIKeyInvalidError()
         if not isinstance(api_key, str):
             raise APIKeyInvalidError()
-        if api_key == "":
+        api_key = normalize_api_key(api_key)
+        if api_key is None:
             raise APIKeyEmptyError()
 
         user_info = QpiAIQuantumAuth.me(api_key=api_key)
@@ -61,12 +69,13 @@ class QpiAIQuantumAuth:
     def me(api_key: str | None = None) -> dict:
         try:
             if api_key is None:
-                user = get_user()
-                if user is None:
+                current_api_key = get_active_api_key()
+                if current_api_key is None:
                     raise UserNotFoundError()
-                current_api_key = user.api_key
             else:
-                current_api_key = api_key
+                current_api_key = normalize_api_key(api_key)
+                if current_api_key is None:
+                    raise APIKeyInvalidError()
 
             headers = {"X-Secret-Token": current_api_key}
             url = get_api_url("/api/users/me")

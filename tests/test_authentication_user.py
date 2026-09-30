@@ -30,3 +30,24 @@ def test_user_context_restores_complete_user() -> None:
             clear_user()
         else:
             set_user(previous_user)
+
+
+def test_user_context_restores_identity_after_error() -> None:
+    """An execution failure must not erase the outer login profile."""
+    import pytest
+
+    previous_user = get_user()
+    original_user = SDKUser(
+        name="Auth Test", email="auth@example.test", api_key="outer-key"
+    )
+    set_user(original_user)
+    try:
+        with pytest.raises(RuntimeError, match="execution failed"):
+            with user_context("temporary-key"):
+                raise RuntimeError("execution failed")
+        assert get_user() == original_user
+    finally:
+        if previous_user is None:
+            clear_user()
+        else:
+            set_user(previous_user)

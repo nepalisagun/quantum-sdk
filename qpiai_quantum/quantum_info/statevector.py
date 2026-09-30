@@ -103,6 +103,13 @@ class Statevector:
         device_name: str = "QpiAI-QSV-Local",
     ):
         """Initialize by simulating a circuit."""
+        from ..authentication.user import resolve_api_key
+
+        if device_name != "QpiAI-QSV-Local" and resolve_api_key() is None:
+            raise ValueError(
+                "API key not found. Set API_KEY or call QpiAIQuantumAuth.login(api_key)."
+            )
+
         circuit_name = f"statevector_circuit_{int(time.time())}"
         result = circuit.run(
             shots=1024,

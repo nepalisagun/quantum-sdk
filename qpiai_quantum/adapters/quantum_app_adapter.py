@@ -1,4 +1,4 @@
-from qpiai_quantum.authentication.user import get_user
+from qpiai_quantum.authentication.user import get_active_auth_header, get_user
 from qpiai_quantum.jobmanager.backend import Backend, ResolvedBackend
 from qpiai_quantum.config import HTTP_TIMEOUT, get_server_url
 import requests
@@ -20,9 +20,11 @@ class QuantumAppAdapter:
         # Setup the request template to the quantum app
 
         self.API_URL = get_server_url()
-        self.headers = {
-            "X-Secret-Token": f"{user.api_key}",
-        }
+        self.headers = get_active_auth_header()
+        if self.headers is None:
+            raise ValueError(
+                "User is not authenticated. Please log in to access the Quantum App and Compute Resources"
+            )
 
     def resolve_backend(self, backend: Backend):
         """

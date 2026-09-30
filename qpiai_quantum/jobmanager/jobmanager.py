@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 import numpy as np  # type: ignore
 
-from ..authentication.user import get_user
+from ..authentication.user import get_active_auth_header
 from ..circuit.circuit import Circuit
 from ..config import HTTP_TIMEOUT, get_api_url, get_sse_url
 from ..icr.icr import IntermediateCircuitRepresentation
@@ -73,11 +73,11 @@ class JobManager:
         Raises:
             BaseError: If user is not authenticated
         """
-        user = get_user()
-        if not user or not user.api_key:
+        headers = get_active_auth_header()
+        if headers is None:
             logger.error("No API key in user context. Login required.")
             raise AuthenticationError()
-        return {"X-Secret-Token": user.api_key}
+        return headers
 
     def _get_compute_resource_id(self, method: str, device_name: str) -> str | None:
         """
