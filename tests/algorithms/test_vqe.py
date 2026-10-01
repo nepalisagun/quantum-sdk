@@ -50,8 +50,9 @@ class TestVQEInitializationAndAnsatz(unittest.TestCase):
 class TestVQEHelpers(unittest.TestCase):
     def test_count_parameters(self):
         vqe = VQESolver(n_qubits=2, ansatz="standard")
-        n_params = vqe._count_parameters()
+        n_params = vqe.num_parameters
         self.assertGreater(n_params, 0)
+        self.assertIsNone(vqe.circuit)
 
     def test_compute_expectation(self):
         vqe = VQESolver(n_qubits=2)
@@ -64,6 +65,111 @@ class TestVQEHelpers(unittest.TestCase):
         }  # Z0=1, Z1=1 -> expectation = 1.0*1 - 0.5*1 + 0.25*1 = 0.75
         exp = vqe._compute_expectation(mock_result)
         self.assertAlmostEqual(exp, 0.75)
+
+    def test_counts_energy_statistics_preserve_group_covariance(self):
+        vqe = VQESolver(n_qubits=2)
+        terms = [([(0, "Z")], 1.0), ([(1, "Z")], 1.0)]
+
+        energy, standard_error = vqe._compute_counts_energy_statistics(
+            {"00": 50, "11": 50}, terms
+        )
+
+        self.assertAlmostEqual(energy, 0.0)
+        self.assertAlmostEqual(standard_error, np.sqrt(4.0 / 99.0))
+
+    def test_sampled_run_reports_fresh_energy_and_uncertainty(self):
+        class OneQubitHamiltonian:
+            def get_hamiltonian_terms(self):
+                return [([(0, "Z")], 1.0)]
+
+        ansatz = Circuit(1)
+        vqe = VQESolver(
+            n_qubits=1,
+            ansatz=lambda _: ansatz,
+            optimizer="cobyla",
+            verbose=False,
+        )
+        optimization_info = {
+            "nfev": 1,
+            "nit": 1,
+            "history": [-9.0],
+            "param_history": [np.array([])],
+            "success": True,
+            "message": "test",
+        }
+        energy_result = MagicMock()
+        energy_result.counts = {"0": 75, "1": 25}
+        bitstring_result = MagicMock()
+        bitstring_result.counts = {"0": 100}
+
+        with (
+            patch.object(
+                vqe,
+                "_optimize_parameters",
+                return_value=(np.array([]), -9.0, optimization_info),
+            ),
+            patch.object(
+                vqe,
+                "_execute_circuit",
+                side_effect=[energy_result, bitstring_result],
+            ),
+        ):
+            result = vqe.run(
+                hamiltonian=OneQubitHamiltonian(),
+                method="qasm",
+                device_name="QpiAI-QSV-Local",
+                shots=100,
+            )
+
+        self.assertAlmostEqual(result.optimal_energy, 0.5)
+        self.assertAlmostEqual(result.energy_standard_error, np.sqrt(0.75 / 99.0))
+        self.assertEqual(result.metadata["optimizer_energy"], -9.0)
+        self.assertEqual(
+            vqe.to_dict(result)["energy_standard_error"],
+            result.energy_standard_error,
+        )
+
+    def test_statevector_run_keeps_exact_optimizer_energy(self):
+        class OneQubitHamiltonian:
+            def get_hamiltonian_terms(self):
+                return [([(0, "Z")], 1.0)]
+
+        ansatz = Circuit(1)
+        vqe = VQESolver(
+            n_qubits=1,
+            ansatz=lambda _: ansatz,
+            optimizer="cobyla",
+            verbose=False,
+        )
+        optimization_info = {
+            "nfev": 1,
+            "nit": 1,
+            "history": [-0.75],
+            "param_history": [np.array([])],
+            "success": True,
+            "message": "test",
+        }
+        bitstring_result = MagicMock()
+        bitstring_result.counts = {"0": 100}
+
+        with (
+            patch.object(
+                vqe,
+                "_optimize_parameters",
+                return_value=(np.array([]), -0.75, optimization_info),
+            ),
+            patch.object(vqe, "_execute_circuit", return_value=bitstring_result),
+        ):
+            result = vqe.run(
+                hamiltonian=OneQubitHamiltonian(),
+                method="statevector",
+                device_name="QpiAI-QSV-Local",
+                shots=100,
+            )
+
+        self.assertEqual(result.optimal_energy, -0.75)
+        self.assertIsNone(result.energy_standard_error)
+        self.assertNotIn("optimizer_energy", result.metadata)
 
 
 @pytest.mark.usefixtures("authenticated_sdk_user")

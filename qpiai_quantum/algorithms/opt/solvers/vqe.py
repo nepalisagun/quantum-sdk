@@ -27,7 +27,13 @@ from ...utils.optimizers import (
 
 @dataclass
 class VQEResult:
-    """Result from VQE execution. Supports both attribute and dictionary-like access."""
+    """Result from VQE execution.
+
+    ``optimal_energy`` is exact in statevector mode. In sampled mode, it is a
+    fresh energy estimate at the optimized parameters, and
+    ``energy_standard_error`` quantifies its finite-shot uncertainty. The noisy
+    energy returned by the optimizer remains available in result metadata.
+    """
 
     optimal_parameters: list[float]
     optimal_energy: float
@@ -36,6 +42,7 @@ class VQEResult:
     bitstring: str
     counts: dict[str, int]
     metadata: dict[str, Any]
+    energy_standard_error: float | None = None
 
     def __getitem__(self, key: str) -> Any:
         """Enable dictionary-like access for backward compatibility."""
@@ -144,6 +151,11 @@ class VQESolver(QuantumAlgorithm):
         self.circuit = self._build_circuit(ansatz, parameters)
         return self.circuit
 
+    @property
+    def num_parameters(self) -> int:
+        """Return the number of logical variational parameters in the ansatz."""
+        return self._parameter_count(self._get_ansatz())
+
     def _get_ansatz(self) -> Circuit:
         """
         Private method: Select and validate ansatz based on configuration.
@@ -194,7 +206,8 @@ class VQESolver(QuantumAlgorithm):
             Parameterized circuit ready for execution
         """
         circuit = Circuit(self.num_qubits)
-        param_idx = 0
+        explicit_parameter_count = self._explicit_parameter_count(ansatz)
+        sequential_param_idx = 0
 
         try:
             if ansatz.icr is None:
@@ -207,7 +220,16 @@ class VQESolver(QuantumAlgorithm):
                 if isinstance(op, CircuitOperation):
                     if op.operation_type == OperationType.N_QUBIT_PARAMETRIC:
                         if parameters is not None:
-                            param_value = float(parameters[param_idx])
+                            parameter_index = getattr(op, "parameter_index", None)
+                            if parameter_index is None:
+                                parameter_index = (
+                                    explicit_parameter_count + sequential_param_idx
+                                )
+                                sequential_param_idx += 1
+                            parameter_scale = float(getattr(op, "parameter_scale", 1.0))
+                            param_value = (
+                                float(parameters[parameter_index]) * parameter_scale
+                            )
                             new_op = CircuitOperation(
                                 operation_type=op.operation_type,
                                 gate_name=op.gate_name,
@@ -216,7 +238,6 @@ class VQESolver(QuantumAlgorithm):
                                 clbits=op.clbits,
                             )
                             circuit.add_operation(new_op)
-                            param_idx += 1
                         else:
                             circuit.add_operation(op)
                     else:
@@ -276,8 +297,16 @@ class VQESolver(QuantumAlgorithm):
         """
         Compute expectation value exactly from a complex statevector.
         """
-        state = np.array(statevector, dtype=complex)
-        n_qubits = int(np.log2(len(state)))
+        state = np.asarray(statevector, dtype=complex).reshape(-1)
+        dimension = state.size
+        if dimension == 0 or dimension & (dimension - 1):
+            raise ValueError("Statevector length must be a non-zero power of two")
+
+        norm = float(np.linalg.norm(state))
+        if not np.isfinite(norm) or not np.isclose(norm, 1.0, rtol=1e-7, atol=1e-9):
+            raise ValueError("Statevector must be normalized before energy evaluation")
+        state /= norm
+        n_qubits = dimension.bit_length() - 1
 
         expectation = 0.0
         for ops, coeff in terms:
@@ -318,12 +347,26 @@ class VQESolver(QuantumAlgorithm):
         """
         Compute expectation value for a list of terms using computational basis counts.
         """
+        expectation, _ = self._compute_counts_energy_statistics(counts, terms)
+        return expectation
+
+    def _compute_counts_energy_statistics(
+        self,
+        counts: dict[str, int],
+        terms: list[tuple[list[tuple[int, str]], float]],
+    ) -> tuple[float, float | None]:
+        """Return a sampled energy mean and its standard error.
+
+        All terms must already be expressed in the basis represented by ``counts``.
+        Treating the sum of terms in a measurement group as one per-shot random
+        variable preserves covariance between terms measured from the same shots.
+        """
         if not counts:
-            return 0.0
+            return 0.0, None
 
         total_shots = sum(counts.values())
         if total_shots == 0:
-            return 0.0
+            return 0.0, None
 
         max_qubit_idx = 0
         for ops, _ in terms:
@@ -331,30 +374,47 @@ class VQESolver(QuantumAlgorithm):
                 max_qubit_idx = max(max_qubit_idx, qi)
         expected_n_qubits = max_qubit_idx + 1
 
-        padded_counts = {}
+        padded_counts: dict[str, int] = {}
         for bitstr, count in counts.items():
             if len(bitstr) < expected_n_qubits:
                 bitstr = bitstr.zfill(expected_n_qubits)
-            padded_counts[bitstr] = count
+            padded_counts[bitstr] = padded_counts.get(bitstr, 0) + count
 
-        expectation = 0.0
-        for ops, coeff in terms:
-            if not ops:
-                expectation += coeff
-                continue
+        observed_energies: dict[str, float] = {}
+        for bitstr in padded_counts:
+            shot_energy = 0.0
+            for ops, coeff in terms:
+                if not ops:
+                    shot_energy += coeff
+                    continue
 
-            term_exp = 0.0
-            for bitstr, count in padded_counts.items():
                 eigenvalue = 1.0
                 for qubit_idx, op_name in ops:
                     if op_name == "I":
                         continue
                     bit = int(bitstr[-(qubit_idx + 1)])
                     eigenvalue *= 1.0 if bit == 0 else -1.0
-                term_exp += eigenvalue * count
-            expectation += coeff * term_exp / total_shots
+                shot_energy += coeff * eigenvalue
+            observed_energies[bitstr] = shot_energy
 
-        return expectation
+        expectation = (
+            sum(
+                padded_counts[bitstr] * energy
+                for bitstr, energy in observed_energies.items()
+            )
+            / total_shots
+        )
+
+        if total_shots < 2:
+            return expectation, None
+
+        sample_variance = sum(
+            padded_counts[bitstr] * (energy - expectation) ** 2
+            for bitstr, energy in observed_energies.items()
+        ) / (total_shots - 1)
+        standard_error = float(np.sqrt(max(sample_variance, 0.0) / total_shots))
+
+        return expectation, standard_error
 
     def _compute_expectation(self, result: BaseQuantumResult) -> float:
         """
@@ -790,22 +850,35 @@ class VQESolver(QuantumAlgorithm):
             f"Example: VQESolver(n_qubits=2, optimizer='cobyla')"
         )
 
-    def _count_parameters(self) -> int:
-        """Count the number of parameters in the ansatz circuit."""
-        circuit = self.build_circuit()
+    @staticmethod
+    def _explicit_parameter_count(circuit: Circuit) -> int:
+        """Return the size of the explicitly indexed parameter range."""
+        indices: list[int] = []
+        for op in circuit.icr.evolve:
+            if (
+                isinstance(op, CircuitOperation)
+                and op.operation_type == OperationType.N_QUBIT_PARAMETRIC
+                and op.parameter_index is not None
+            ):
+                indices.append(op.parameter_index)
+        return max(indices, default=-1) + 1
 
-        if not hasattr(circuit, "icr") or not circuit.icr:
-            return 0
-
-        if not hasattr(circuit.icr, "evolve"):
-            return 0
-
-        return sum(
+    @classmethod
+    def _parameter_count(cls, circuit: Circuit) -> int:
+        """Count logical parameters, including shared indexed parameters."""
+        explicit_count = cls._explicit_parameter_count(circuit)
+        sequential_count = sum(
             1
             for op in circuit.icr.evolve
             if isinstance(op, CircuitOperation)
             and op.operation_type == OperationType.N_QUBIT_PARAMETRIC
+            and getattr(op, "parameter_index", None) is None
         )
+        return explicit_count + sequential_count
+
+    def _count_parameters(self) -> int:
+        """Count the number of logical parameters in the ansatz circuit."""
+        return self.num_parameters
 
     def _get_n_qubits_from_hamiltonian(self, hamiltonian: Any) -> int:
         """Determine number of qubits needed from Hamiltonian structure."""
@@ -902,7 +975,7 @@ class VQESolver(QuantumAlgorithm):
             hamiltonian: Problem Hamiltonian (required for VQE)
             shots: Number of measurement shots
             experiment_name: Name of the experiment (default: "Default Experiment")
-            device_name: Target device name ('QpiAI-QSV-Local', 'QpiAI-QSV-Simulator', 'QpiAI-QDM-Simulator', 'QpiAI-QTN-Simulator', 'QpiAI-Indus-1')
+            device_name: Target device name ('QpiAI-QSV-Simulator', 'QpiAI-QDM-Simulator', 'QpiAI-QTN-Simulator', 'QpiAI-Indus-1')
             reverse_bits: Reverse bit order in results
             **kwargs: Additional parameters
 
@@ -912,7 +985,12 @@ class VQESolver(QuantumAlgorithm):
         # Map high-level device_name to low-level (device, method)
         from qpiai_quantum.circuit.circuit import _map_device_name_to_method
 
-        method = _map_device_name_to_method(device_name)
+        requested_method = kwargs.pop("method", None)
+        method = (
+            requested_method
+            if requested_method is not None
+            else _map_device_name_to_method(device_name)
+        )
 
         if "hamiltonian" in kwargs:
             self.hamiltonian = kwargs["hamiltonian"]
@@ -941,12 +1019,7 @@ class VQESolver(QuantumAlgorithm):
             raise ValueError("Ansatz circuit must have valid ICR evolution operations")
 
         # Count parameters
-        n_params = sum(
-            1
-            for op in ansatz.icr.evolve
-            if isinstance(op, CircuitOperation)
-            and op.operation_type == OperationType.N_QUBIT_PARAMETRIC
-        )
+        n_params = self._parameter_count(ansatz)
 
         # Initialize parameters
         if self.initial_point is not None:
@@ -972,26 +1045,15 @@ class VQESolver(QuantumAlgorithm):
         else:
             grouped_terms = []
 
-        def objective(theta: np.ndarray) -> float:
-            """Compute energy for given parameters."""
-            if method == "statevector":
-                circuit = self._build_circuit(ansatz, theta, measure=False)
-                result = self._execute_circuit(
-                    circuit,
-                    method=method,
-                    device_name=device_name,
-                    shots=shots,
-                    experiment_name=experiment_name,
-                    reverse_bits=reverse_bits,
-                )
-                if not hasattr(result, "statevector") or result.statevector is None:
-                    raise RuntimeError(
-                        "Simulator did not return a statevector in statevector mode."
-                    )
-                return self._compute_statevector_expectation(result.statevector, terms)
-
-            elif has_xy:
+        def evaluate_sampled_energy(
+            theta: np.ndarray,
+        ) -> tuple[float, float | None]:
+            """Evaluate energy from a fresh set of measurement counts."""
+            if has_xy:
                 total_energy = identity_constant
+                total_variance = 0.0
+                uncertainty_available = True
+
                 for basis_dict, group_terms in grouped_terms:
                     circuit = self._build_circuit(ansatz, theta, measure=False)
                     for q, op in basis_dict.items():
@@ -1011,13 +1073,45 @@ class VQESolver(QuantumAlgorithm):
                         reverse_bits=reverse_bits,
                     )
                     counts = result.counts if result.counts else {}
-                    total_energy += self._compute_counts_expectation(
-                        counts, group_terms
-                    )
-                return total_energy
+                    if not counts:
+                        raise RuntimeError(
+                            "Sampled VQE execution returned no measurement counts."
+                        )
 
-            else:
-                circuit = self._build_circuit(ansatz, theta, measure=True)
+                    group_energy, group_standard_error = (
+                        self._compute_counts_energy_statistics(counts, group_terms)
+                    )
+                    total_energy += group_energy
+                    if group_standard_error is None:
+                        uncertainty_available = False
+                    else:
+                        total_variance += group_standard_error**2
+
+                standard_error = (
+                    float(np.sqrt(total_variance)) if uncertainty_available else None
+                )
+                return total_energy, standard_error
+
+            circuit = self._build_circuit(ansatz, theta, measure=True)
+            result = self._execute_circuit(
+                circuit,
+                method=method,
+                device_name=device_name,
+                shots=shots,
+                experiment_name=experiment_name,
+                reverse_bits=reverse_bits,
+            )
+            counts = result.counts if result.counts else {}
+            if not counts:
+                raise RuntimeError(
+                    "Sampled VQE execution returned no measurement counts."
+                )
+            return self._compute_counts_energy_statistics(counts, terms)
+
+        def objective(theta: np.ndarray) -> float:
+            """Compute energy for given parameters."""
+            if method == "statevector":
+                circuit = self._build_circuit(ansatz, theta, measure=False)
                 result = self._execute_circuit(
                     circuit,
                     method=method,
@@ -1026,7 +1120,14 @@ class VQESolver(QuantumAlgorithm):
                     experiment_name=experiment_name,
                     reverse_bits=reverse_bits,
                 )
-                return self._compute_expectation(result)
+                if not hasattr(result, "statevector") or result.statevector is None:
+                    raise RuntimeError(
+                        "Simulator did not return a statevector in statevector mode."
+                    )
+                return self._compute_statevector_expectation(result.statevector, terms)
+
+            sampled_energy, _ = evaluate_sampled_energy(theta)
+            return sampled_energy
 
         # Run optimization (info is printed in _optimize_parameters)
         opt_result = self._optimize_parameters(
@@ -1036,9 +1137,17 @@ class VQESolver(QuantumAlgorithm):
             **kwargs,
         )
 
-        best_params, best_energy, opt_info = opt_result
+        best_params, optimizer_energy, opt_info = opt_result
         actual_iterations = opt_info.get("nit", 0)
         actual_nfev = opt_info.get("nfev", 0)
+
+        if method == "statevector":
+            optimal_energy = float(optimizer_energy)
+            energy_standard_error = None
+        else:
+            optimal_energy, energy_standard_error = evaluate_sampled_energy(
+                np.asarray(best_params, dtype=float)
+            )
 
         # Print completion summary
         if self.verbose:
@@ -1048,7 +1157,9 @@ class VQESolver(QuantumAlgorithm):
             print(f"Actual Iterations:   {actual_iterations}")
             print(f"Max Iterations:      {self.max_iterations}")
             print(f"Circuit Evaluations: {actual_nfev}")
-            print(f"Final Energy:        {best_energy:.6f}")
+            print(f"Final Energy:        {optimal_energy:.6f}")
+            if energy_standard_error is not None:
+                print(f"Standard Error:      {energy_standard_error:.6f}")
             print(f"Success:             {opt_info.get('success', False)}")
 
             # Check if iterations match expectations
@@ -1088,7 +1199,7 @@ class VQESolver(QuantumAlgorithm):
 
         return VQEResult(
             optimal_parameters=best_params.tolist(),
-            optimal_energy=best_energy,
+            optimal_energy=optimal_energy,
             energy_history=opt_info.get("history", []),
             param_history=[p.tolist() for p in opt_info.get("param_history", [])],
             bitstring=best_bitstring,
@@ -1107,7 +1218,13 @@ class VQESolver(QuantumAlgorithm):
                 "n_parameters": n_params,
                 "optimizer": self.optimizer,
                 "converged_early": actual_iterations < self.max_iterations,
+                **(
+                    {"optimizer_energy": float(optimizer_energy)}
+                    if method != "statevector"
+                    else {}
+                ),
             },
+            energy_standard_error=energy_standard_error,
         )
 
     def to_dict(self, result: "VQEResult") -> dict[str, Any]:
@@ -1123,6 +1240,7 @@ class VQESolver(QuantumAlgorithm):
         return {
             "optimal_parameters": result.optimal_parameters,
             "optimal_energy": result.optimal_energy,
+            "energy_standard_error": result.energy_standard_error,
             "energy_history": result.energy_history,
             "param_history": result.param_history,
             "bitstring": result.bitstring,

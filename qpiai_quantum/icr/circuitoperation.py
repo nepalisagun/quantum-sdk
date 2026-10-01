@@ -46,12 +46,16 @@ class CircuitOperation:
         qubits: list[int],
         params: list[float] | None = None,
         clbits: list[int] | None = None,
+        parameter_index: int | None = None,
+        parameter_scale: float = 1.0,
     ):
         self.operation_type = operation_type
         self.gate_name = gate_name
         self.qubits = qubits
         self.params = params
         self.clbits = clbits
+        self.parameter_index = parameter_index
+        self.parameter_scale = parameter_scale
 
     def to_json(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -63,6 +67,9 @@ class CircuitOperation:
             result["params"] = self.params
         if self.clbits is not None:
             result["clbits"] = self.clbits
+        if self.parameter_index is not None:
+            result["parameter_index"] = self.parameter_index
+            result["parameter_scale"] = self.parameter_scale
         order = getattr(self, "order", None)
         if order is not None:
             result["order"] = [op.to_json() for op in order]

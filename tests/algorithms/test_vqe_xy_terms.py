@@ -56,6 +56,16 @@ class TestVQEXYTerms(unittest.TestCase):
         exp = vqe._compute_statevector_expectation(state, terms)
         self.assertAlmostEqual(exp, 0.25)
 
+    def test_statevector_expectation_rejects_invalid_state(self):
+        vqe = VQESolver(n_qubits=1)
+        terms = [([(0, "Z")], 1.0)]
+
+        with self.assertRaisesRegex(ValueError, "power of two"):
+            vqe._compute_statevector_expectation([1.0, 0.0, 0.0], terms)
+
+        with self.assertRaisesRegex(ValueError, "normalized"):
+            vqe._compute_statevector_expectation([2.0, 0.0], terms)
+
     def test_grouping_terms(self):
         terms = [
             ([(0, "X"), (1, "Y")], 1.0),

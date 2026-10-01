@@ -36,7 +36,7 @@ def _map_device_name_to_method(device_name: str):
     elif device_name == "QpiAI-QDM-Lite":
         return "density_matrix"
     elif device_name == "QpiAI-QSV-Local":
-        return None
+        return "statevector"
     else:
         return "statevector"
 

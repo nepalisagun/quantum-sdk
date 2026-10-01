@@ -1,6 +1,6 @@
 import numpy as np
 from dataclasses import dataclass
-from typing import Union, Optional
+from typing import TypedDict
 from .mappers import FermionOperator
 
 
@@ -48,8 +48,18 @@ class MolecularProperties:
         return h_ferm
 
 
+class _FallbackMolecule(TypedDict):
+    """Scalar metadata stored for an offline molecular fallback."""
+
+    n_electrons: int
+    n_orbitals: int
+    nuclear_repulsion_energy: float
+    hf_energy: float
+    hf_state: list[int]
+
+
 # Pre-computed fallback database of molecular properties for Windows / Offline usage
-_FALLBACK_DATABASE = {
+_FALLBACK_DATABASE: dict[str, _FallbackMolecule] = {
     "h2": {
         "n_electrons": 2,
         "n_orbitals": 4,
@@ -65,6 +75,68 @@ _FALLBACK_DATABASE = {
         "hf_state": [1, 1, 0, 0],
     },
 }
+
+_FALLBACK_BOND_LENGTHS: dict[str, float] = {
+    "h2": 0.735,
+    "lih": 1.596,
+}
+
+
+def _parse_diatomic_geometry(
+    geometry: str,
+) -> tuple[tuple[str, np.ndarray], tuple[str, np.ndarray]] | None:
+    """Parse a two-atom Cartesian geometry used by the fallback database."""
+    atom_specs = [part.strip() for part in geometry.replace("\n", ";").split(";")]
+    if len(atom_specs) != 2 or any(not part for part in atom_specs):
+        return None
+
+    atoms: list[tuple[str, np.ndarray]] = []
+    for atom_spec in atom_specs:
+        fields = atom_spec.split()
+        if len(fields) != 4:
+            return None
+        try:
+            coordinates = np.asarray(
+                [float(value) for value in fields[1:]], dtype=float
+            )
+        except ValueError:
+            return None
+        atoms.append((fields[0].lower(), coordinates))
+
+    return atoms[0], atoms[1]
+
+
+def _resolve_precomputed_molecule(
+    geometry: str,
+    basis: str,
+    charge: int,
+    multiplicity: int,
+) -> str | None:
+    """Return an exact fallback key for a supported molecular configuration."""
+    if basis.lower() != "sto-3g" or charge != 0 or multiplicity != 1:
+        return None
+
+    shorthand = geometry.strip().lower()
+    if shorthand in _FALLBACK_BOND_LENGTHS:
+        return shorthand
+
+    atoms = _parse_diatomic_geometry(geometry)
+    if atoms is None:
+        return None
+
+    (first_symbol, first_position), (second_symbol, second_position) = atoms
+    symbols = tuple(sorted((first_symbol, second_symbol)))
+    bond_length = float(np.linalg.norm(second_position - first_position))
+
+    if symbols == ("h", "h") and np.isclose(
+        bond_length, _FALLBACK_BOND_LENGTHS["h2"], rtol=0.0, atol=1e-8
+    ):
+        return "h2"
+    if symbols == ("h", "li") and np.isclose(
+        bond_length, _FALLBACK_BOND_LENGTHS["lih"], rtol=0.0, atol=1e-8
+    ):
+        return "lih"
+    return None
 
 
 def _get_precomputed_h2() -> MolecularProperties:
@@ -84,6 +156,8 @@ def _get_precomputed_h2() -> MolecularProperties:
     h2_spatial[1, 1, 0, 0] = 0.66458173
     h2_spatial[0, 1, 1, 0] = 0.18093120
     h2_spatial[1, 0, 0, 1] = 0.18093120
+    h2_spatial[0, 1, 0, 1] = 0.18093120
+    h2_spatial[1, 0, 1, 0] = 0.18093120
 
     # Convert to spin-orbitals
     for p in range(2):
@@ -129,6 +203,8 @@ def _get_precomputed_lih() -> MolecularProperties:
     h2_spatial[1, 1, 0, 0] = 0.22372441
     h2_spatial[0, 1, 1, 0] = 0.01302394
     h2_spatial[1, 0, 0, 1] = 0.01302394
+    h2_spatial[0, 1, 0, 1] = 0.01302394
+    h2_spatial[1, 0, 1, 0] = 0.01302394
 
     # Convert to spin-orbitals
     for p in range(2):
@@ -182,12 +258,6 @@ class MolecularDriver:
         Returns:
             MolecularProperties containing molecular integrals and energy info.
         """
-        # Parse simple name strings (like 'h2' or 'lih') or fallback on PySCF import failure
-        geometry_lower = self.geometry.lower().replace(" ", "").replace(";", "")
-
-        is_h2 = "h000" in geometry_lower or geometry_lower == "h2"
-        is_lih = "li" in geometry_lower or geometry_lower == "lih"
-
         # Resolve shorthand geometries
         geometry_map = {
             "h2": "H 0 0 0; H 0 0 0.735",
@@ -246,9 +316,22 @@ class MolecularDriver:
                 two_body_integrals=h2,
             )
 
-        except ImportError:
-            # Fallback to database on Windows/environment without PySCF
-            if is_h2 or not is_lih:
+        except ImportError as exc:
+            # Fall back only when the complete molecular configuration matches
+            # a precomputed entry. Never silently substitute a different molecule.
+            fallback_key = _resolve_precomputed_molecule(
+                geometry=self.geometry,
+                basis=self.basis,
+                charge=self.charge,
+                multiplicity=self.multiplicity,
+            )
+            if fallback_key == "h2":
                 return _get_precomputed_h2()
-            else:
+            if fallback_key == "lih":
                 return _get_precomputed_lih()
+            raise ImportError(
+                "PySCF is unavailable and no exact precomputed chemistry dataset "
+                "matches the requested geometry, basis, charge, and multiplicity. "
+                "Supported fallbacks are neutral singlet H2 at 0.735 Angstrom and "
+                "LiH at 1.596 Angstrom in the STO-3G basis."
+            ) from exc

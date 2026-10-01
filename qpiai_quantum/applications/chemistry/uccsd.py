@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import numpy as np
 from qpiai_quantum.circuit import Circuit
 from qpiai_quantum.icr.circuitoperation import CircuitOperation, OperationType
 from .mappers import FermionOperator, jordan_wigner, bravyi_kitaev
@@ -11,7 +10,7 @@ def _add_parameterized_pauli_rotation(
     pauli_string: list[tuple[int, str]],
     coeff_imag: float,
     param_idx: int,
-):
+) -> None:
     """
     Append an exponential Pauli rotation circuit e^(i * theta * coeff_imag * P) to the circuit,
     parameterized by parameter index param_idx.
@@ -38,33 +37,20 @@ def _add_parameterized_pauli_rotation(
     for idx in range(len(qubits) - 1):
         circuit.cx(qubits[idx], qubits[idx + 1])
 
-    # 3. Parameterized rotation
-    # We want to implement e^(i * theta * coeff_imag * P).
-    # Since Rz(phi) = e^(-i * phi * Z / 2), setting phi = -2 * coeff_imag * theta
-    # gives e^(i * theta * coeff_imag * Z).
-    # Since VQE supplies positive theta, we implement the sign using:
-    # - If sign is negative: circuit.rz(theta, target_qubit)
-    # - If sign is positive: circuit.x(target_qubit); circuit.rz(theta, target_qubit); circuit.x(target_qubit)
-    # We absorb the magnitude |2 * coeff_imag| (which is 1.0 or similar) as a scaling factor.
-    angle_sign = -np.sign(coeff_imag)
-
-    # We add a custom parameterized Rz operation
-    # The SDK VQESolver maps the parameter using its 0-indexed position.
-    # To associate it with param_idx, we construct a CircuitOperation.
+    # 3. Parameterized rotation. For an anti-Hermitian excitation term
+    # i*c*P, exp(theta*i*c*P) is implemented by Rz(-2*c*theta) after the
+    # basis change and parity computation. All Pauli rotations belonging to
+    # one excitation share the same logical parameter index.
     rz_op = CircuitOperation(
         operation_type=OperationType.N_QUBIT_PARAMETRIC,
         gate_name="rz",
         qubits=[target_qubit],
         params=[0.0],  # Placeholder, will be replaced by VQESolver during run()
         clbits=[],
+        parameter_index=param_idx,
+        parameter_scale=-2.0 * coeff_imag,
     )
-
-    if angle_sign < 0:
-        circuit.add_operation(rz_op)
-    else:
-        circuit.x(target_qubit)
-        circuit.add_operation(rz_op)
-        circuit.x(target_qubit)
+    circuit.add_operation(rz_op)
 
     # 4. Uncompute CNOT chain
     for idx in reversed(range(len(qubits) - 1)):
@@ -139,7 +125,7 @@ def uccsd_ansatz(
 
         # Append Pauli rotations for this single excitation parameter
         for pauli_str, coeff in pauli_list:
-            _add_parameterized_pauli_rotation(circuit, pauli_str, 0.5, param_idx)
+            _add_parameterized_pauli_rotation(circuit, pauli_str, coeff, param_idx)
 
         param_idx += 1
 
@@ -160,7 +146,7 @@ def uccsd_ansatz(
             pauli_list = jordan_wigner(ferm_op)
 
         for pauli_str, coeff in pauli_list:
-            _add_parameterized_pauli_rotation(circuit, pauli_str, 0.5, param_idx)
+            _add_parameterized_pauli_rotation(circuit, pauli_str, coeff, param_idx)
 
         param_idx += 1
 
