@@ -31,9 +31,11 @@ repos:
       - id: end-of-file-fixer
       - id: trailing-whitespace
 
-  - repo: https://github.com/pypa/pip-audit
-    rev: v2.7.3
+  - repo: local
     hooks:
       - id: pip-audit
+        name: pip-audit project environment
+        entry: uv run pip-audit
+        language: system
         files: ^(pyproject\.toml|uv\.lock)$
         pass_filenames: false
