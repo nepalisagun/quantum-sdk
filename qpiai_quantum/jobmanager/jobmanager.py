@@ -24,6 +24,8 @@ from .exceptions import (
     JobSubmissionError,
 )
 from .job_result import JobResult
+from .result_decoding import decode_density_matrix, decode_statevector
+from .result_contract import ContractValidationError, validate_binary_manifest
 from .sse_handler import SSEResultHandler, SSE_AVAILABLE
 
 logger = logging.getLogger("qpiai_quantum.jobmanager")
@@ -1029,7 +1031,9 @@ class JobManager:
 
             # Parse results data (supports direct JSON or S3 path indirection)
             try:
-                results_data = self._resolve_job_response_data(response_data)
+                results_data = self._resolve_job_response_data(
+                    response_data, job_id=job_id
+                )
             except Exception as e:
                 raise InvalidResponseError(f"Failed to resolve results data: {e}")
 
@@ -1050,39 +1054,16 @@ class JobManager:
                         "counts", data_section.get("histogram", {})
                     )
 
-            # Convert statevector format to match Executor format if needed
-            statevector = results_data.get("statevector")
-            if (
-                statevector
-                and len(statevector) > 0
-                and isinstance(statevector[0], dict)
-                and "real" in statevector[0]
-                and "imag" in statevector[0]
-            ):
-                import operator
+            statevector = decode_statevector(results_data.get("statevector"))
 
-                get_real = operator.itemgetter("real")
-                get_imag = operator.itemgetter("imag")
-                reals = np.fromiter(
-                    map(get_real, statevector),
-                    dtype=np.float64,
-                    count=len(statevector),
-                )
-                imags = np.fromiter(
-                    map(get_imag, statevector),
-                    dtype=np.float64,
-                    count=len(statevector),
-                )
-                converted_statevector = (reals + 1j * imags).reshape(-1, 1).tolist()
-                statevector = converted_statevector
-
-            # Create JobResult object with rich job metadata
             execution_result = JobResult(
                 name=results_data.get("name", f"Job_{job_id}"),
                 counts=counts,
                 statevector=statevector,
                 probabilities=results_data.get("probabilities"),
-                density_matrix=results_data.get("density_matrix"),
+                density_matrix=decode_density_matrix(
+                    results_data.get("density_matrix")
+                ),
                 message="Job completed successfully",
                 execution_time=job_data.get("execution_time_ms", 0) / 1000.0
                 if job_data.get("execution_time_ms")
@@ -1127,15 +1108,31 @@ class JobManager:
         except Exception as e:
             raise JobManagerError(f"Unexpected error while getting job results: {e}")
 
-    def _extract_s3_path_from_response(self, response_data: Any) -> str | None:
+    def _extract_s3_result_reference(
+        self, response_data: Any
+    ) -> tuple[str, dict[str, Any] | None] | None:
+        """Recursively find an S3 result path and its binary manifest."""
         if isinstance(response_data, str) and response_data.startswith("s3://"):
-            return response_data
+            return response_data, None
 
         if isinstance(response_data, dict):
+            if (
+                response_data.get("large_file")
+                and response_data.get("bucket")
+                and response_data.get("key")
+            ):
+                s3_path = f"s3://{response_data['bucket']}/{response_data['key']}"
+                return s3_path, response_data
+
             for key in ["s3_path", "s3_uri", "s3_url"]:
                 value = response_data.get(key)
                 if isinstance(value, str) and value.startswith("s3://"):
-                    return value
+                    manifest = (
+                        response_data
+                        if "format" in response_data or "artifacts" in response_data
+                        else None
+                    )
+                    return value, manifest
 
             for nested_key in [
                 "response_data",
@@ -1145,17 +1142,58 @@ class JobManager:
                 "data",
             ]:
                 nested_value = response_data.get(nested_key)
-                if isinstance(nested_value, str) and nested_value.startswith("s3://"):
-                    return nested_value
-                if isinstance(nested_value, dict):
-                    nested_s3_path = self._extract_s3_path_from_response(nested_value)
-                    if nested_s3_path:
-                        return nested_s3_path
+                nested_reference = self._extract_s3_result_reference(nested_value)
+                if nested_reference:
+                    return nested_reference
 
         return None
 
+    @staticmethod
+    def _decode_binary_artifact_payload(
+        raw_bytes: bytes, manifest: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Validate and decode a versioned multi-artifact binary payload."""
+        try:
+            counts, execution_time, artifacts = validate_binary_manifest(
+                len(raw_bytes), manifest
+            )
+        except ContractValidationError as exc:
+            raise InvalidResponseError(str(exc)) from exc
+
+        decoded_artifacts: dict[str, Any] = {}
+        for artifact in artifacts:
+            end_offset = artifact.offset_bytes + artifact.size_bytes
+            complex_values = np.frombuffer(
+                raw_bytes[artifact.offset_bytes : end_offset], dtype=np.dtype("<c16")
+            )
+            if artifact.result_type == "statevector":
+                decoded_artifacts[artifact.result_type] = np.reshape(
+                    complex_values, (-1, 1)
+                ).tolist()
+            else:
+                decoded_artifacts[artifact.result_type] = np.reshape(
+                    complex_values, artifact.shape
+                ).tolist()
+
+        result_data = {"counts": counts, **decoded_artifacts}
+        return {
+            "results": {"data": result_data},
+            **result_data,
+            "execution_time": execution_time,
+            "message": "Job completed successfully",
+        }
+
+    def _extract_s3_path_from_response(self, response_data: Any) -> str | None:
+        """Return only the S3 path from a nested result response."""
+        reference = self._extract_s3_result_reference(response_data)
+        return reference[0] if reference else None
+
     def _download_s3_result_via_backend(
-        self, s3_path: str, result_type: str | None = None
+        self,
+        s3_path: str,
+        result_type: str | None = None,
+        manifest: dict[str, Any] | None = None,
+        job_id: str | None = None,
     ) -> dict[str, Any]:
         try:
             import requests
@@ -1170,7 +1208,7 @@ class JobManager:
         try:
             response = requests.post(
                 download_url,
-                json={"s3_path": s3_path},
+                json={"s3_path": s3_path, **({"job_id": job_id} if job_id else {})},
                 headers=headers,
                 timeout=HTTP_TIMEOUT,
             )
@@ -1208,6 +1246,10 @@ class JobManager:
             import numpy as np
 
             raw_bytes = file_response.content
+            if manifest is not None and (
+                "format" in manifest or "artifacts" in manifest
+            ):
+                return self._decode_binary_artifact_payload(raw_bytes, manifest)
             complex_arr = np.frombuffer(raw_bytes, dtype=np.complex128)
 
             if result_type == "density_matrix" or "density_matrix" in s3_path:
@@ -1236,7 +1278,9 @@ class JobManager:
                     f"Downloaded S3 result file is not valid JSON for '{s3_path}': {e}"
                 )
 
-    def _resolve_job_response_data(self, response_data: Any) -> Any:
+    def _resolve_job_response_data(
+        self, response_data: Any, job_id: str | None = None
+    ) -> Any:
         parsed_data = response_data
 
         if isinstance(parsed_data, str):
@@ -1247,38 +1291,23 @@ class JobManager:
             except (json.JSONDecodeError, TypeError):
                 pass
 
-        s3_path = self._extract_s3_path_from_response(parsed_data)
-        if s3_path:
-            return self._download_s3_result_via_backend(s3_path)
-
-        # Handle binary S3 pointer from qcloud-workers (large_file + bucket + key)
-        if (
-            isinstance(parsed_data, dict)
-            and parsed_data.get("large_file")
-            and parsed_data.get("bucket")
-            and parsed_data.get("key")
-        ):
-            constructed_s3_path = f"s3://{parsed_data['bucket']}/{parsed_data['key']}"
-            result_type = parsed_data.get("result_type")
+        s3_reference = self._extract_s3_result_reference(parsed_data)
+        if s3_reference:
+            s3_path, manifest = s3_reference
             downloaded = self._download_s3_result_via_backend(
-                constructed_s3_path, result_type=result_type
+                s3_path,
+                manifest=manifest,
+                job_id=job_id,
+                result_type=manifest.get("result_type") if manifest else None,
             )
-            # Merge metadata from the pointer (counts, execution_time) into downloaded result
-            if isinstance(downloaded, dict):
-                pointer_counts = parsed_data.get("counts")
-                if pointer_counts and not downloaded.get("counts"):
-                    downloaded["counts"] = pointer_counts
-                    if "results" in downloaded and isinstance(
-                        downloaded["results"], dict
-                    ):
-                        downloaded["results"].setdefault("data", {})["counts"] = (
-                            pointer_counts
-                        )
-                pointer_exec_time = parsed_data.get("execution_time")
-                if pointer_exec_time:
-                    downloaded.setdefault(
-                        "execution_time", f"{pointer_exec_time:.4f} seconds"
-                    )
+            if manifest and "format" not in manifest and "artifacts" not in manifest:
+                if "counts" in manifest:
+                    downloaded.setdefault("counts", manifest["counts"])
+                    downloaded.setdefault("results", {}).setdefault(
+                        "data", {}
+                    ).setdefault("counts", manifest["counts"])
+                if "execution_time" in manifest:
+                    downloaded.setdefault("execution_time", manifest["execution_time"])
             return downloaded
 
         return parsed_data
@@ -1313,8 +1342,8 @@ class JobManager:
 
         return {
             "counts": data.get("counts"),
-            "statevector": data.get("statevector"),
-            "density_matrix": data.get("density_matrix"),
+            "statevector": decode_statevector(data.get("statevector")),
+            "density_matrix": decode_density_matrix(data.get("density_matrix")),
             "probabilities": data.get("probabilities"),
             "execution_time": response_data.get("execution_time"),
             "message": response_data.get("message"),
@@ -1397,7 +1426,10 @@ class JobManager:
         if server_response_str:
             try:
                 parsed_server_response = self._resolve_job_response_data(
-                    server_response_str
+                    server_response_str,
+                    job_id=job_result.get("id")
+                    or job_result.get("job_id")
+                    or job_result.get("proxy_id"),
                 )
                 if not isinstance(parsed_server_response, dict):
                     raise InvalidResponseError(

@@ -29,7 +29,7 @@ class JobResult(BaseQuantumResult):
         counts: dict[str, int] | None = None,
         statevector: list[list[complex]] | None = None,
         probabilities: dict[str, float] | None = None,
-        density_matrix: list[list[float]] | None = None,
+        density_matrix: list[list[complex]] | None = None,
         message: str | None = "Job executed successfully",
         execution_time: float = 0.0,
         cpu_usage: float = 0.0,

@@ -971,8 +971,8 @@ class Circuit:
         self,
         shots: int = 1024,
         experiment_name: str = "Default Experiment",
-        need_statevector: bool = False,
-        need_density_matrix: bool = False,
+        need_statevector: bool | None = None,
+        need_density_matrix: bool | None = None,
         device_name: str = "QpiAI-QSV-Simulator",
         reverse_bits: bool = False,
         **kwargs,
@@ -997,7 +997,18 @@ class Circuit:
         if (
             device_name == "QpiAI-QDM-Simulator" or device_name == "QpiAI-QDM-Lite"
         ) and need_statevector:
-            raise ValueError("Cannot get statevector from Density Matrix simulator.")
+            raise ValueError(
+                "QDM simulators return density matrices only. For a pure result, convert it with DensityMatrix(...).to_statevector()."
+            )
+
+        if need_density_matrix is None:
+            need_density_matrix = device_name in {
+                "QpiAI-QDM-Simulator",
+                "QpiAI-QDM-Lite",
+                "QpiAI-QTN-Simulator",
+            }
+        if need_statevector is None:
+            need_statevector = device_name == "QpiAI-QTN-Simulator"
 
         if device_name == "QpiAI-QSV-Local":
             from ..authentication.user import get_user

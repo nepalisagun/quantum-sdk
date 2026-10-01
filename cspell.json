@@ -290,6 +290,7 @@
     "psutil",
     "seaborn",
     "fromiter",
+    "imag",
     "imags"
   ],
   "ignorePaths": [

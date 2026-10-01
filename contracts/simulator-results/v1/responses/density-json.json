@@ -1,0 +1,13 @@
+{
+  "message": "Simulation completed",
+  "execution_time": "0.1250 seconds",
+  "data": {
+    "counts": {"00": 32, "11": 32},
+    "density_matrix": [
+      [{"real": 0.5, "imag": 0.0}, {"real": 0.0, "imag": 0.0}, {"real": 0.0, "imag": 0.0}, {"real": 0.5, "imag": 0.0}],
+      [{"real": 0.0, "imag": 0.0}, {"real": 0.0, "imag": 0.0}, {"real": 0.0, "imag": 0.0}, {"real": 0.0, "imag": 0.0}],
+      [{"real": 0.0, "imag": 0.0}, {"real": 0.0, "imag": 0.0}, {"real": 0.0, "imag": 0.0}, {"real": 0.0, "imag": 0.0}],
+      [{"real": 0.5, "imag": 0.0}, {"real": 0.0, "imag": 0.0}, {"real": 0.0, "imag": 0.0}, {"real": 0.5, "imag": 0.0}]
+    ]
+  }
+}
