@@ -128,6 +128,7 @@ class QRNG(QuantumAlgorithm):
         self,
         shots: int = 1,
         output_format: str = "int",
+        device_name: str = "QpiAI-QSV-Local",
     ) -> int | bytes | str | list:
         """
         Generate quantum random number(s).
@@ -137,6 +138,7 @@ class QRNG(QuantumAlgorithm):
                 a single value is returned; otherwise a list is returned.
             output_format (str): ``"int"`` (default), ``"bytes"``, or
                 ``"bitstring"``.
+            device_name (str): Device to run on. Default: QpiAI-QSV-Local.
 
         Returns:
             A single value when *shots=1*, or a list of values otherwise.
@@ -150,6 +152,7 @@ class QRNG(QuantumAlgorithm):
         result: BaseQuantumResult = self.run(
             shots=shots,
             experiment_name="Default Experiment",
+            device_name=device_name,
         )
         counts = result.get()["counts"]
 
