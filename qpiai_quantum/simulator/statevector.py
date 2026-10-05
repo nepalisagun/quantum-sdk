@@ -31,7 +31,12 @@ except ImportError:
 
 try:
     import numba
-    from numba import njit, prange
+    from numba import njit
+
+    if TYPE_CHECKING:
+        from builtins import range as prange
+    else:
+        from numba import prange
 
     NUMBA_AVAILABLE = True
 except ImportError:
@@ -127,7 +132,9 @@ class StatevectorSimulator(BaseSimulator):
             initial_state: Optional initial statevector for the simulation.
 
         Returns:
-            A QasmSimulatorResult object containing counts and statevector.
+            A result with counts and a statevector when pure, or a density
+            matrix when intermediate measurement/reset produces a mixture.
+            Terminal measurements preserve the state immediately before them.
         """
         start_time = time.perf_counter()
 
@@ -151,6 +158,11 @@ class StatevectorSimulator(BaseSimulator):
 
         dim = 2**n_qubits
         if initial_state is not None:
+            initial_state = np.asarray(initial_state, dtype=complex)
+            if initial_state.ndim != 1 or not np.all(np.isfinite(initial_state)):
+                raise ValueError(
+                    "Initial state must be a finite one-dimensional vector"
+                )
             if len(initial_state) != dim:
                 raise ValueError(
                     f"Initial state dimension {len(initial_state)} does not match circuit qubit dimension {dim}."
@@ -165,76 +177,27 @@ class StatevectorSimulator(BaseSimulator):
             state = np.zeros(dim, dtype=complex)
             state[0] = 1.0
 
-        measure_map: dict[int, int] = {}
+        from .operation_execution import execute
 
-        # Define internal applicator for recursive decomposition handling
-        def _apply_gate(gate_name: str, params: list[float], qubits: list[int]) -> None:
-            nonlocal state
-            gate_name_lower = gate_name.lower()
-
-            if gate_name_lower in DECOMPOSED_GATES:
-                for sub_name, sub_params, sub_qubits in decompose(
-                    gate_name_lower, qubits
-                ):
-                    _apply_gate(sub_name, sub_params, sub_qubits)
-                return
-
-            _, U = gate_spec(gate_name_lower, params, num_qubits=len(qubits))
-            state = self._apply_unitary(state, n_qubits, qubits, U)
-
-        # Define internal applicator for recursive operation handling
-        def _apply_op(op) -> None:
-            nonlocal state
-            if op.operation_type == OperationType.BARRIER:
-                return
-
-            elif op.operation_type == OperationType.MEASURE:
-                # Store the last measurement targeting this classical bit
-                if op.qubits and op.clbits:
-                    for q, c in zip(op.qubits, op.clbits):
-                        measure_map[q] = c
-
-            elif op.operation_type in (
-                OperationType.N_QUBIT_NON_PARAMETRIC,
-                OperationType.N_QUBIT_PARAMETRIC,
-                OperationType.SWAP,
-            ):
-                _apply_gate(op.gate_name, op.params or [], op.qubits)
-
-            elif op.operation_type == OperationType.OPERATION:
-                # If it's a composite gate with sub-operations, apply recursively
-                if hasattr(op, "order") and op.order is not None:
-                    for sub_op in op.order:
-                        _apply_op(sub_op)
-                else:
-                    _apply_gate(op.gate_name, op.params or [], op.qubits)
-
-            else:
-                # Handle reset if we eventually add it to OperationType
-                if op.gate_name.lower() == "reset" and op.qubits:
-                    for q in op.qubits:
-                        state = self._apply_reset(state, n_qubits, q)
-                else:
-                    raise ValueError(f"Unsupported operation type: {op.operation_type}")
-
-        # Iterate directly through the circuit's evolution list
-        for op in circuit.icr.evolve:
-            _apply_op(op)
-
-        # Sample measurements if requested
-        if n_cbits > 0 and measure_map:
-            counts = self._sample_counts(
-                state, n_qubits, n_cbits, measure_map, shots, seed
-            )
-        else:
-            counts = {}
+        statevector, density_matrix, counts, metadata = execute(
+            circuit.icr.evolve,
+            state,
+            n_qubits,
+            n_cbits,
+            shots,
+            seed,
+            self._apply_unitary,
+            lambda: None,
+        )
 
         elapsed_time = time.perf_counter() - start_time
 
         return QasmSimulatorResult(
             name=name or circuit.name,
             counts=counts,
-            statevector=state.tolist(),
+            statevector=statevector,
+            density_matrix=density_matrix,
+            job_metadata=metadata,
             shots=shots,
             execution_time=elapsed_time,
             method="statevector",
@@ -281,17 +244,20 @@ class StatevectorSimulator(BaseSimulator):
 
     @staticmethod
     def _apply_reset(state: np.ndarray, n: int, qubit: int) -> np.ndarray:
-        """Reset a single qubit to |0>, collapsing and renormalising."""
-        tensor = state.reshape([2] * n)
-        axis = int(n - 1 - qubit)
-        tensor = np.moveaxis(tensor, axis, 0)
-        tensor[1, ...] = 0.0
-        tensor = np.moveaxis(tensor, 0, axis)
-        flat = tensor.reshape(-1)
-        norm = np.linalg.norm(flat)
-        if norm > 0:
-            flat = flat / norm
-        return flat
+        """Sample one reset trajectory; ensemble execution retains both outcomes."""
+        from .operation_execution import project
+
+        rng = np.random.default_rng()
+        p0, _ = project(state, qubit, 0)
+        outcome = int(rng.random() >= p0)
+        _, collapsed = project(state, qubit, outcome)
+        if collapsed is None:
+            raise ValueError("Reset input must have nonzero norm")
+        if outcome:
+            from .gates import X
+
+            collapsed = StatevectorSimulator._apply_unitary(collapsed, n, [qubit], X)
+        return collapsed
 
     @staticmethod
     def _sample_counts(

@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import Any, Optional
+from .validation import validate_index, validate_parameter
 
 
 class OperationType(Enum):
@@ -7,6 +8,7 @@ class OperationType(Enum):
     N_QUBIT_PARAMETRIC = "n_qubit_parametric"
     MEASURE = "measure"
     BARRIER = "barrier"
+    RESET = "reset"
     SWAP = "swap"
     OPERATION = "operation"
 
@@ -14,6 +16,8 @@ class OperationType(Enum):
 class CircuitOperation:
     _registry: dict[str, type["CircuitOperation"]] = {}
     order: list["CircuitOperation"] | None
+    base_operation: "CircuitOperation"
+    control_qubits: list[int]
 
     def __init_subclass__(cls):
         """
@@ -51,9 +55,13 @@ class CircuitOperation:
     ):
         self.operation_type = operation_type
         self.gate_name = gate_name
-        self.qubits = qubits
-        self.params = params
-        self.clbits = clbits
+        self.qubits = [validate_index(q) for q in qubits]
+        if len(set(self.qubits)) != len(self.qubits):
+            raise ValueError("Duplicate qubits are not allowed")
+        self.params = (
+            None if params is None else [validate_parameter(p) for p in params]
+        )
+        self.clbits = None if clbits is None else [validate_index(c) for c in clbits]
         self.parameter_index = parameter_index
         self.parameter_scale = parameter_scale
 
@@ -73,6 +81,10 @@ class CircuitOperation:
         order = getattr(self, "order", None)
         if order is not None:
             result["order"] = [op.to_json() for op in order]
+        base = getattr(self, "base_operation", None)
+        if base is not None:
+            result["base_operation"] = base.to_json()
+            result["control_qubits"] = list(self.control_qubits)
         return result
 
 
@@ -393,6 +405,11 @@ class BarrierOperation(CircuitOperation):
 
 
 # Generic operation container
+class ResetOperation(CircuitOperation):
+    def __init__(self, qubit: int):
+        super().__init__(OperationType.RESET, "reset", [qubit])
+
+
 class Operation(CircuitOperation):
     def __init__(
         self,

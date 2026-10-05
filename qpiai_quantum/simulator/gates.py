@@ -14,6 +14,7 @@ Conventions:
 """
 
 import numpy as np
+from ..icr.validation import validate_parameter
 
 # --------------------------------------------------------------------------
 # Single-qubit gate matrix factories
@@ -222,7 +223,29 @@ def gate_spec(
     Raises:
         ValueError: If the gate name is not recognised.
     """
-    p = params
+    p = [validate_parameter(p) for p in params]
+    parameter_counts = {
+        "rx": 1,
+        "ry": 1,
+        "rz": 1,
+        "p": 1,
+        "u1": 1,
+        "u2": 2,
+        "u": 3,
+        "u3": 3,
+        "cp": 1,
+        "cu1": 1,
+        "crx": 1,
+        "cry": 1,
+        "crz": 1,
+        "rxx": 1,
+        "ryy": 1,
+        "rzz": 1,
+        "cu3": 3,
+        "cu": 4,
+    }
+    if len(p) != parameter_counts.get(name, 0):
+        raise ValueError(f"Incorrect parameter count for gate {name}")
 
     # -- Single-qubit non-parametric --
     if name == "id":
@@ -345,6 +368,7 @@ def decompose(name: str, qubits: list[int]) -> list[tuple[str, list[float], list
             ("u1", [np.pi / 4], [c]),
             ("cx", [], [b, c]),
             ("u1", [-np.pi / 4], [c]),
+            ("u2", [0.0, np.pi], [c]),
         ]
 
     raise ValueError(f"No decomposition known for {name}")

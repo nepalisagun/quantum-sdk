@@ -150,6 +150,23 @@ class Circuit:
                 "Invalid operation type, expected a CircuitOperation object."
             )
 
+        from ..icr.validation import validate_parameter
+
+        def validate(item: CircuitOperation) -> None:
+            self._validate_unique_qubits(*item.qubits)
+            for qubit in item.qubits:
+                self._validate_qubit(qubit)
+            for clbit in item.clbits or []:
+                self._validate_clbit(clbit)
+            for parameter in item.params or []:
+                validate_parameter(parameter)
+            base = getattr(item, "base_operation", None)
+            if base is not None:
+                validate(base)
+            for sub in getattr(item, "order", None) or []:
+                validate(sub)
+
+        validate(operation)
         self.icr._add_operation(operation)
 
     def compose(self, other: "Circuit", qubits: list[int] | None = None):
@@ -172,12 +189,21 @@ class Circuit:
         for op in other.icr.evolve:
             new_op = copy.deepcopy(op)
             if qubits is not None:
-                if getattr(new_op, "qubits", None) is not None:
-                    new_op.qubits = [qubits[q] for q in new_op.qubits]
-                if getattr(new_op, "order", None):
-                    for sub_op in new_op.order:
-                        if getattr(sub_op, "qubits", None) is not None:
-                            sub_op.qubits = [qubits[q] for q in sub_op.qubits]
+                for q in qubits:
+                    self._validate_qubit(q)
+                self._validate_unique_qubits(*qubits)
+
+                def remap(operation: CircuitOperation) -> None:
+                    operation.qubits = [qubits[q] for q in operation.qubits]
+                    if getattr(operation, "base_operation", None) is not None:
+                        operation.control_qubits = [
+                            qubits[q] for q in operation.control_qubits
+                        ]
+                        remap(operation.base_operation)
+                    for sub in getattr(operation, "order", None) or []:
+                        remap(sub)
+
+                remap(new_op)
             self.add_operation(new_op)
 
     def inverse(self) -> "Circuit":
@@ -193,7 +219,43 @@ class Circuit:
         inv_circuit = Circuit(self.num_qubits, self.num_clbits)
 
         def invert_op(op: CircuitOperation) -> CircuitOperation:
+            if getattr(op, "base_operation", None) is not None:
+                from ..icr.operationmodifiers import CustomControlOperation
+
+                return CustomControlOperation(
+                    *op.control_qubits, operation=invert_op(op.base_operation)
+                )
+            if op.operation_type in (OperationType.MEASURE, OperationType.RESET):
+                raise CircuitError(
+                    "Measurement and reset operations have no unitary inverse"
+                )
+            if (
+                op.operation_type == OperationType.OPERATION
+                and getattr(op, "order", None) is not None
+            ):
+                result = copy.deepcopy(op)
+                result.order = [invert_op(sub) for sub in reversed(op.order or [])]
+                return result
             name = op.__class__.__name__
+            if op.gate_name.lower() == "dcx":
+                from ..icr.circuitoperation import CXGate
+
+                result = copy.deepcopy(op)
+                result.operation_type = OperationType.OPERATION
+                result.order = [CXGate(op.qubits[1], op.qubits[0]), CXGate(*op.qubits)]
+                return result
+            if name == "CircuitOperation":
+                aliases = {
+                    "u1": "PGate",
+                    "u3": "UGate",
+                    "cu1": "CPGate",
+                    "cu3": "CUGate",
+                }
+                name = aliases.get(op.gate_name.lower(), name)
+                if op.gate_name.lower() == "cu3":
+                    op = copy.deepcopy(op)
+                    op.params = [*(op.params or []), 0.0]
+                    op.gate_name = "cu"
 
             # Self-inverse gates
             if name in [
@@ -207,7 +269,6 @@ class Circuit:
                 "CZGate",
                 "CHGate",
                 "ECRGate",
-                "DCXGate",
                 "SwapGate",
                 "CCXGate",
                 "RCCXGate",
@@ -332,12 +393,18 @@ class Circuit:
         return str(self.icr)
 
     def _validate_qubit(self, qubit: int):
+        from ..icr.validation import validate_index
+
+        validate_index(qubit)
         if not (0 <= qubit < self.icr.num_qubits):
             raise CircuitError(
                 f"Qubit index {qubit} out of range. Valid range: 0-{self.icr.num_qubits - 1}"
             )
 
     def _validate_clbit(self, clbit: int):
+        from ..icr.validation import validate_index
+
+        validate_index(clbit)
         if not (0 <= clbit < self.icr.num_clbits):
             raise CircuitError(
                 f"Classical bit index {clbit} out of range. Valid range: 0-{self.icr.num_clbits - 1}"
@@ -360,8 +427,8 @@ class Circuit:
         # validate circuit can be converted to a single circuit operation
 
         for gate in gates:
-            if gate.operation_type == OperationType.MEASURE:
-                raise CircuitError("Circuit contains measurement operations.")
+            if gate.operation_type in (OperationType.MEASURE, OperationType.RESET):
+                raise CircuitError("Circuit contains measurement or reset operations.")
 
         qubits = []
         params = []
@@ -917,6 +984,13 @@ class Circuit:
             self._validate_qubit(ctrl)
         self._validate_qubit(target_qubit)
         self.MCX(control_qubits, target_qubit)  # type: ignore
+
+    def reset(self, qubit: int) -> None:
+        """Reset a qubit to zero, discarding its previous quantum state."""
+        from ..icr.circuitoperation import ResetOperation
+
+        self._validate_qubit(qubit)
+        self.add_operation(ResetOperation(qubit))
 
     def barrier(self, *qubits: int):
         self._validate_unique_qubits(*qubits)

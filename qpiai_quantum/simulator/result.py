@@ -244,6 +244,10 @@ class QasmSimulatorResult(BaseQuantumResult):
             data["counts"] = self.counts
         if self.statevector:
             data["statevector"] = self.statevector
+        if self.density_matrix is not None:
+            data["density_matrix"] = self.density_matrix
+        if self.job_metadata:
+            data["job_metadata"] = self.job_metadata
         if self.probabilities:
             data["probabilities"] = self.probabilities
         if self.shots and self.shots > 0:
