@@ -65,6 +65,26 @@ class CircuitOperation:
         self.parameter_index = parameter_index
         self.parameter_scale = parameter_scale
 
+    def decompose(self) -> list["CircuitOperation"] | None:
+        """Return an independent gate body, or None for an opaque operation.
+
+        Composite bodies and shared named definitions use the same interface.
+        Controlled wrappers remain structural: consumers must preserve their
+        controls while visiting the base operation. Measurement/reset have no
+        unitary decomposition.
+        """
+        import copy
+        from .decomposition import gate_decomposition
+
+        if self.operation_type in (OperationType.MEASURE, OperationType.RESET):
+            return None
+        if getattr(self, "base_operation", None) is not None:
+            return None
+        body = getattr(self, "order", None)
+        if body is not None:
+            return copy.deepcopy(body)
+        return gate_decomposition(self.gate_name, self.qubits, self.params)
+
     def to_json(self) -> dict[str, Any]:
         result: dict[str, Any] = {
             "operation_type": self.operation_type.value,

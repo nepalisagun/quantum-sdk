@@ -229,21 +229,13 @@ class Circuit:
                 raise CircuitError(
                     "Measurement and reset operations have no unitary inverse"
                 )
-            if (
-                op.operation_type == OperationType.OPERATION
-                and getattr(op, "order", None) is not None
-            ):
-                result = copy.deepcopy(op)
-                result.order = [invert_op(sub) for sub in reversed(op.order or [])]
-                return result
-            name = op.__class__.__name__
-            if op.gate_name.lower() == "dcx":
-                from ..icr.circuitoperation import CXGate
-
+            body = op.decompose()
+            if body is not None:
                 result = copy.deepcopy(op)
                 result.operation_type = OperationType.OPERATION
-                result.order = [CXGate(op.qubits[1], op.qubits[0]), CXGate(*op.qubits)]
+                result.order = [invert_op(sub) for sub in reversed(body)]
                 return result
+            name = op.__class__.__name__
             if name == "CircuitOperation":
                 aliases = {
                     "u1": "PGate",
@@ -271,7 +263,6 @@ class Circuit:
                 "ECRGate",
                 "SwapGate",
                 "CCXGate",
-                "RCCXGate",
                 "CSwapGate",
             ]:
                 return copy.deepcopy(op)

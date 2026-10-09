@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from qpiai_quantum.circuit import Circuit
 
 from .base_simulator import BaseSimulator
-from .gates import DECOMPOSED_GATES, decompose, gate_spec
+from .gates import gate_spec
 from .result import QasmSimulatorResult
 
 try:

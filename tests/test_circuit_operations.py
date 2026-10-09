@@ -506,14 +506,17 @@ def test_csdg_gate():
 
 
 def test_inverse_dcx_gate():
-    """Test that DCX is self-inverse."""
+    """DCX inverse reverses its two CNOTs."""
     circ = Circuit(2)
     circ.dcx(0, 1)
 
     inv_circ = circ.inverse()
     ops = list(inv_circ.icr.evolve)
     assert len(ops) == 1
-    assert isinstance(ops[0], DCXGate)
+    assert [(op.gate_name.lower(), op.qubits) for op in ops[0].order] == [
+        ("cx", [1, 0]),
+        ("cx", [0, 1]),
+    ]
 
 
 def test_inverse_rccx_gate():

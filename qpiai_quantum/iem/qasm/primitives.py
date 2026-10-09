@@ -9,6 +9,7 @@ from math import pi
 from typing import Any
 
 from ...icr.validation import validate_parameter
+from ...icr.decomposition import gate_decomposition
 
 Primitive = tuple[str, list[float], list[int]]
 
@@ -62,7 +63,11 @@ def lower_operation(operation: Any) -> list[Primitive]:
     def emit(name: str, p: list[float], q: list[int], ctrl: list[int]) -> None:
         name = name.lower()
         p = [validate_parameter(v) for v in p]
-        if name in {"u", "u3"}:
+        body = gate_decomposition(name, q, p)
+        if body is not None:
+            for child in body:
+                emit(child.gate_name, child.params or [], child.qubits, ctrl)
+        elif name in {"u", "u3"}:
             single(ctrl, q[0], *p)
         elif name == "u2":
             single(ctrl, q[0], pi / 2, *p)
@@ -143,14 +148,6 @@ def lower_operation(operation: Any) -> list[Primitive]:
             emit(sign, [], [q[1]], ctrl)
             emit("cz", [], q, ctrl)
             emit("swap", [], q, ctrl)
-        elif name == "dcx":
-            emit("cx", [], q, ctrl)
-            emit("cx", [], q[::-1], ctrl)
-        elif name == "rccx":
-            from ...simulator.gates import decompose
-
-            for sub, values, wires in decompose(name, q):
-                emit(sub, values, wires, ctrl)
         elif name in {"rzz", "rxx", "ryy"}:
             if name == "rxx":
                 for wire in q:

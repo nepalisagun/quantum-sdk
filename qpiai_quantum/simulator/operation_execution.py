@@ -8,7 +8,7 @@ import psutil
 
 from ..icr.validation import validate_index
 from ..icr.circuitoperation import CircuitOperation
-from .gates import DECOMPOSED_GATES, X, decompose, gate_spec
+from .gates import X, gate_spec
 
 
 def flatten(operations: Iterable[CircuitOperation]) -> Iterator[CircuitOperation]:
@@ -45,8 +45,9 @@ def apply_operation(
             check_budget,
             (*controls, *operation.control_qubits),
         )
-    if getattr(operation, "order", None) is not None:
-        for sub in operation.order or []:
+    body = operation.decompose()
+    if body is not None:
+        for sub in body:
             state = apply_operation(
                 state, n, sub, apply_unitary, check_budget, controls
             )
@@ -56,17 +57,6 @@ def apply_operation(
         return state
     if name in {"measure", "reset"}:
         raise ValueError("Non-unitary operations cannot be applied as controlled gates")
-    if name in DECOMPOSED_GATES:
-        from ..icr.circuitoperation import CircuitOperation, OperationType
-
-        for sub_name, params, qubits in decompose(name, operation.qubits):
-            item = CircuitOperation(
-                OperationType.N_QUBIT_PARAMETRIC, sub_name, qubits, params
-            )
-            state = apply_operation(
-                state, n, item, apply_unitary, check_budget, controls
-            )
-        return state
     qubits = operation.qubits
     if name == "mcx":
         controls = (*controls, *qubits[:-1])

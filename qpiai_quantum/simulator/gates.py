@@ -15,6 +15,7 @@ Conventions:
 
 import numpy as np
 from ..icr.validation import validate_parameter
+from ..icr.decomposition import DECOMPOSED_GATES, gate_decomposition
 
 # --------------------------------------------------------------------------
 # Single-qubit gate matrix factories
@@ -211,9 +212,6 @@ ALL_KNOWN_GATES: set[str] = {
     "mcx",
 }
 
-#: Gates handled via decomposition rather than a single matrix.
-DECOMPOSED_GATES: set[str] = {"dcx", "rccx"}
-
 
 def gate_spec(
     name: str, params: list[float], num_qubits: int | None = None
@@ -352,23 +350,14 @@ def decompose(name: str, qubits: list[int]) -> list[tuple[str, list[float], list
     Raises:
         ValueError: If no decomposition is known for *name*.
     """
-    if name == "dcx":
-        a, b = qubits
-        return [("cx", [], [a, b]), ("cx", [], [b, a])]
-
-    if name == "rccx":
-        # Exact qelib1.inc definition (simplified / relative-phase Toffoli)
-        a, b, c = qubits
-        return [
-            ("u2", [0.0, np.pi], [c]),
-            ("u1", [np.pi / 4], [c]),
-            ("cx", [], [b, c]),
-            ("u1", [-np.pi / 4], [c]),
-            ("cx", [], [a, c]),
-            ("u1", [np.pi / 4], [c]),
-            ("cx", [], [b, c]),
-            ("u1", [-np.pi / 4], [c]),
-            ("u2", [0.0, np.pi], [c]),
-        ]
-
-    raise ValueError(f"No decomposition known for {name}")
+    body = gate_decomposition(name, qubits)
+    if body is None:
+        raise ValueError(f"No decomposition known for {name}")
+    return [
+        (
+            "u1" if child.gate_name.lower() == "p" else child.gate_name.lower(),
+            child.params or [],
+            child.qubits,
+        )
+        for child in body
+    ]
