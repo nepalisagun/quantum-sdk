@@ -41,5 +41,5 @@ def test_shared_scaled_parameters_and_legacy_rotations() -> None:
 
 def test_local_method_mapping_preserves_public_device_policy() -> None:
     assert _map_device_name_to_method("QpiAI-QSV-Local") == "statevector"
-    assert _map_device_name_to_method("QpiAI-Indus-1") == "statevector"
+    assert _map_device_name_to_method("QpiAI-Indus-1") == "qpu"
     assert _map_device_name_to_method("QpiAI-QSV-Lite") == "statevector_sampling"

@@ -30,7 +30,7 @@ def _map_device_name_to_method(device_name: str):
     elif device_name == "QpiAI-QTN-Simulator":
         return "tensor_network"
     elif device_name == "QpiAI-Indus-1":
-        return "statevector"
+        return "qpu"
     elif device_name == "QpiAI-QSV-Lite":
         return "statevector_sampling"
     elif device_name == "QpiAI-QDM-Lite":

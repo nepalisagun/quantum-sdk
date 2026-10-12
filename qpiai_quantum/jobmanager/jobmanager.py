@@ -111,7 +111,7 @@ class JobManager:
             ("statevector", "QpiAI-QSV-Simulator"): "QpiAI-QSV-Simulator",
             ("density_matrix", "QpiAI-QDM-Simulator"): "QpiAI-QDM-Simulator",
             ("tensor_network", "QpiAI-QTN-Simulator"): "QpiAI-QTN-Simulator",
-            ("statevector", "QpiAI-Indus-1"): "QpiAI-Indus-1",
+            ("qpu", "QpiAI-Indus-1"): "QpiAI-Indus-1",
             ("statevector_sampling", "QpiAI-QSV-Lite"): "QpiAI-QSV-Lite",
             ("density_matrix", "QpiAI-QDM-Lite"): "QpiAI-QDM-Lite",
         }
