@@ -121,7 +121,7 @@ class VQESolver(QuantumAlgorithm):
         ansatz: str | Callable = "standard",
         optimizer: str = "adam",
         max_iterations: int = 100,
-        initial_point: np.ndarray | None = None,
+        initial_point: np.ndarray | list[float] | None = None,
         verbose: bool = True,
         name: str = "VQE",
     ):
@@ -563,7 +563,12 @@ class VQESolver(QuantumAlgorithm):
         }
 
         # Add other valid run parameters
-        valid_run_params = ["experiment_name", "reverse_bits"]
+        valid_run_params = [
+            "experiment_name",
+            "reverse_bits",
+            "need_statevector",
+            "need_density_matrix",
+        ]
         for param in valid_run_params:
             if param in kwargs:
                 run_kwargs[param] = kwargs[param]
@@ -961,7 +966,7 @@ class VQESolver(QuantumAlgorithm):
         self,
         shots: int = 1024,
         experiment_name: str = "Default Experiment",
-        need_statevector: bool = True,
+        need_statevector: bool | None = None,
         need_density_matrix: bool = False,
         device_name: str = "QpiAI-QSV-Local",
         reverse_bits: bool = False,
@@ -975,8 +980,14 @@ class VQESolver(QuantumAlgorithm):
             hamiltonian: Problem Hamiltonian (required for VQE)
             shots: Number of measurement shots
             experiment_name: Name of the experiment (default: "Default Experiment")
+            need_statevector: Defaults to True for exact statevector energy
+                evaluation and False for sampled energy evaluation. Exact mode
+                requires a statevector and rejects an explicit False.
+            need_density_matrix: Request a density matrix in addition to the
+                results needed for energy evaluation (default: False).
             device_name: Target device name ('QpiAI-QSV-Simulator', 'QpiAI-QDM-Simulator', 'QpiAI-QTN-Simulator', 'QpiAI-Indus-1')
-            reverse_bits: Reverse bit order in results
+            reverse_bits: Reverse bit order in returned counts and bitstring.
+                Energy evaluation always uses canonical qubit order.
             **kwargs: Additional parameters
 
         Returns:
@@ -991,6 +1002,17 @@ class VQESolver(QuantumAlgorithm):
             if requested_method is not None
             else _map_device_name_to_method(device_name)
         )
+        if need_statevector is None:
+            need_statevector = method == "statevector"
+        if method == "statevector" and not need_statevector:
+            raise ValueError(
+                "Exact statevector VQE requires need_statevector=True. "
+                "Use a sampled execution method to evaluate energy from counts."
+            )
+        result_flags = {
+            "need_statevector": need_statevector,
+            "need_density_matrix": need_density_matrix,
+        }
 
         if "hamiltonian" in kwargs:
             self.hamiltonian = kwargs["hamiltonian"]
@@ -1048,7 +1070,7 @@ class VQESolver(QuantumAlgorithm):
         def evaluate_sampled_energy(
             theta: np.ndarray,
         ) -> tuple[float, float | None]:
-            """Evaluate energy from a fresh set of measurement counts."""
+            """Evaluate fresh counts in canonical order, before display reversal."""
             if has_xy:
                 total_energy = identity_constant
                 total_variance = 0.0
@@ -1070,7 +1092,8 @@ class VQESolver(QuantumAlgorithm):
                         device_name=device_name,
                         shots=shots,
                         experiment_name=experiment_name,
-                        reverse_bits=reverse_bits,
+                        reverse_bits=False,
+                        **result_flags,
                     )
                     counts = result.counts if result.counts else {}
                     if not counts:
@@ -1099,7 +1122,8 @@ class VQESolver(QuantumAlgorithm):
                 device_name=device_name,
                 shots=shots,
                 experiment_name=experiment_name,
-                reverse_bits=reverse_bits,
+                reverse_bits=False,
+                **result_flags,
             )
             counts = result.counts if result.counts else {}
             if not counts:
@@ -1118,7 +1142,8 @@ class VQESolver(QuantumAlgorithm):
                     device_name=device_name,
                     shots=shots,
                     experiment_name=experiment_name,
-                    reverse_bits=reverse_bits,
+                    reverse_bits=False,
+                    **result_flags,
                 )
                 if not hasattr(result, "statevector") or result.statevector is None:
                     raise RuntimeError(
@@ -1132,7 +1157,7 @@ class VQESolver(QuantumAlgorithm):
         # Run optimization (info is printed in _optimize_parameters)
         opt_result = self._optimize_parameters(
             objective=objective,
-            initial_point=self.initial_point,
+            initial_point=params,
             n_params=n_params,
             **kwargs,
         )
@@ -1181,6 +1206,7 @@ class VQESolver(QuantumAlgorithm):
             shots=shots,
             experiment_name=experiment_name,
             reverse_bits=reverse_bits,
+            **result_flags,
         )
 
         final_counts = final_result.counts if final_result.counts else {}
