@@ -5,6 +5,13 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_call:
+    secrets:
+      API_KEY:
+        required: true
+
+permissions:
+  contents: read
 
 jobs:
   verify:
@@ -14,6 +21,12 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
       fail-fast: false
     steps:
+      - name: Require authentication for release verification
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+        run: test -n "$API_KEY"
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -28,7 +41,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install Dependencies
-        run: uv sync --all-extras
+        run: uv sync --frozen --all-extras
 
       - name: Lint Check
         run: uv run ruff check .

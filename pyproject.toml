@@ -84,6 +84,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["qpiai_quantum*"]
 exclude = [
     "tutorial_notebooks",
     "quantum_sdk_tests",
