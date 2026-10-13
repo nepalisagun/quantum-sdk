@@ -67,7 +67,8 @@ class VQESolver(QuantumAlgorithm):
     ensuring consistency across the SDK.
 
     Args:
-        n_qubits: Number of qubits in the system
+        n_qubits: Declared register width. The Hamiltonian must fit this register,
+            and the ansatz must have exactly this many qubits.
         ansatz: Quantum circuit ansatz ('standard', 'hardware_efficient', 'two_local', or callable, default: 'standard')
         optimizer: Optimization method ('adam', 'gradient_descent', 'cobyla', 'spsa', etc.)
         max_iterations: Maximum number of optimization iterations (default: 100)
@@ -179,6 +180,13 @@ class VQESolver(QuantumAlgorithm):
 
         if not isinstance(ansatz, Circuit):
             raise ValueError("Ansatz must be a Circuit object")
+
+        if ansatz.num_qubits != self.num_qubits:
+            raise ValueError(
+                f"Ansatz has {ansatz.num_qubits} qubits, but the declared VQE register "
+                f"has {self.num_qubits}. Return an ansatz with the declared width "
+                "or update n_qubits to match."
+            )
 
         if not hasattr(ansatz, "icr") or not ansatz.icr:
             raise ValueError("Ansatz circuit must have ICR representation")
@@ -886,7 +894,7 @@ class VQESolver(QuantumAlgorithm):
         return self.num_parameters
 
     def _get_n_qubits_from_hamiltonian(self, hamiltonian: Any) -> int:
-        """Determine number of qubits needed from Hamiltonian structure."""
+        """Return the minimum register width required by Hamiltonian indices."""
         n_qubits = 0
         try:
             for term, _ in hamiltonian.get_hamiltonian_terms():
@@ -1024,9 +1032,14 @@ class VQESolver(QuantumAlgorithm):
 
         self.shots = shots
 
-        # Determine number of qubits from Hamiltonian
-        n_qubits = self._get_n_qubits_from_hamiltonian(self.hamiltonian)
-        self.num_qubits = n_qubits
+        # Hamiltonian support is a minimum requirement, not the circuit width.
+        required_width = self._get_n_qubits_from_hamiltonian(self.hamiltonian)
+        if required_width > self.num_qubits:
+            raise ValueError(
+                f"Hamiltonian requires {required_width} qubits, but the declared "
+                f"VQE register has {self.num_qubits}. Increase n_qubits and use "
+                "a matching ansatz, or correct the Hamiltonian qubit indices."
+            )
 
         # Get and validate ansatz
         ansatz = self._get_ansatz()
