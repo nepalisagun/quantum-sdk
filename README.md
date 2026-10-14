@@ -12,6 +12,7 @@ The following diagram illustrates how QpiAI's products work together. The QpiAI 
 
 ![Architecture Diagram](https://raw.githubusercontent.com/qpiai/quantum-sdk/main/docs/architecture_diagram.png)
 
+<!--
 <details>
 <summary>Show Mermaid Source Code</summary>
 
@@ -39,12 +40,13 @@ Python Program"]
     end
 
     %% The Pipeline Flow
-    Notebooks --> SDK
-    Agents --> SDK
-    SDK -->|Local Run| LocalSim
-    SDK -->|Remote Job| Remote
+    Notebooks --&gt; SDK
+    Agents --&gt; SDK
+    SDK --&gt;|Local Run| LocalSim
+    SDK --&gt;|Remote Job| Remote
 ```
 </details>
+-->
 
 ## Features
 
@@ -101,6 +103,12 @@ The QpiAI Quantum SDK is available as an open-source package. Install directly f
 
 ```bash
 pip install qpiai-quantum
+```
+
+To upgrade an existing installation to the latest version, add `--upgrade` (or `-U`):
+
+```bash
+pip install --upgrade qpiai-quantum
 ```
 
 ### Verify Installation
